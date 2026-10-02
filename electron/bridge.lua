@@ -344,8 +344,15 @@ end
 local function presets()
   local _, p = project()
   if not p then return { ok = false, error = 'No project open' } end
+  -- Resolve returns this list with gaps (e.g. no entry 21). ipairs stops at
+  -- the first gap, which hid every preset after it, including custom ones.
+  local raw, keys = p:GetRenderPresetList() or {}, {}
+  for k, v in pairs(raw) do
+    if type(k) == 'number' and type(v) == 'string' and v ~= '' then keys[#keys + 1] = k end
+  end
+  table.sort(keys)
   local list = array()
-  for _, n in ipairs(p:GetRenderPresetList() or {}) do list[#list + 1] = n end
+  for _, k in ipairs(keys) do list[#list + 1] = raw[k] end
   return { ok = true, presets = list }
 end
 
