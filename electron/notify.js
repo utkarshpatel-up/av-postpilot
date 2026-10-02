@@ -1,0 +1,89 @@
+// Messages to Telegram (bot) and WhatsApp (Whapi.Cloud), personal chats and groups.
+// Tokens are passed in by main.js (stored encrypted there), never kept here.
+
+async function post(url, body, headers = {}) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json', ...headers },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(20000),
+  });
+  const text = await res.text();
+  let json = null;
+  try { json = JSON.parse(text); } catch { /* not json */ }
+  if (!res.ok || (json && json.ok === false)) {
+    const why = (json && (json.description || json.error?.message || json.message)) || text.slice(0, 200) || res.statusText;
+    throw new Error(`${res.status} ${why}`);
+  }
+  return json;
+}
+
+async function get(url, headers = {}) {
+  const res = await fetch(url, { headers: { accept: 'application/json', ...headers }, signal: AbortSignal.timeout(20000) });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json || json.ok === false) {
+    throw new Error(`${res.status} ${(json && (json.description || json.error?.message || json.message)) || res.statusText}`);
+  }
+  return json;
+}
+
+const telegram = {
+  send: (token, chatId, text) => post(`https://api.telegram.org/bot${token}/sendMessage`, { chat_id: chatId, text }),
+  // Chats that recently messaged the bot or added it to a group.
+  async findChats(token) {
+    const json = await get(`https://api.telegram.org/bot${token}/getUpdates`);
+    const chats = new Map();
+    for (const u of json.result || []) {
+      const c = (u.message || u.channel_post || u.my_chat_member || u.edited_message || {}).chat;
+      if (c) chats.set(String(c.id), { id: String(c.id), name: c.title || [c.first_name, c.last_name].filter(Boolean).join(' ') || c.username || String(c.id), type: c.type });
+    }
+    return [...chats.values()];
+  },
+};
+
+const whapi = {
+  send: (token, to, text) => post('https://gate.whapi.cloud/messages/text', { to, body: text }, { authorization: `Bearer ${token}` }),
+  async findGroups(token) {
+    const json = await get('https://gate.whapi.cloud/groups?count=100', { authorization: `Bearer ${token}` });
+    return (json.groups || []).map((g) => ({ id: g.id, name: g.name || g.id, type: 'group' }));
+  },
+};
+
+// Phone numbers: keep digits only (country code included, no "+").
+function normaliseWhapiTarget(to) {
+  const t = String(to).trim();
+  return /@/.test(t) ? t : t.replace(/\D/g, '');
+}
+
+class Notifier {
+  constructor({ getSettings, getSecret, log, pc }) {
+    Object.assign(this, { getSettings, getSecret, log, pc });
+  }
+
+  // event: key from settings.notify.events; returns number of messages sent
+  async notify(event, text) {
+    const n = this.getSettings().notify;
+    if (event && !n.events[event]) return 0;
+    return this.sendAll(`${text}\n— ${this.pc}`);
+  }
+
+  async sendAll(text) {
+    const n = this.getSettings().notify;
+    const jobs = [];
+    const tg = this.getSecret('telegram');
+    if (n.telegram.enabled && tg) {
+      for (const c of n.telegram.chats) jobs.push(['Telegram', c.name || c.id, () => telegram.send(tg, c.id, text)]);
+    }
+    const wa = this.getSecret('whapi');
+    if (n.whapi.enabled && wa) {
+      for (const c of n.whapi.chats) jobs.push(['WhatsApp', c.name || c.id, () => whapi.send(wa, normaliseWhapiTarget(c.id), text)]);
+    }
+    let sent = 0;
+    await Promise.all(jobs.map(async ([svc, who, fn]) => {
+      try { await fn(); sent++; } catch (err) { this.log('warn', `${svc} message to ${who} failed: ${err.message}`); }
+    }));
+    return sent;
+  }
+}
+
+module.exports = { Notifier, telegram, whapi, normaliseWhapiTarget };

@@ -1,0 +1,7 @@
+local r = bmd.scriptapp('Resolve', 'localhost')
+local tl = r:GetProjectManager():GetCurrentProject():GetTimelineByIndex(1)
+local ok, f = pcall(function() return tl.TotallyMadeUpFunction end)
+print('fake name exists:', ok and f ~= nil)
+local ok2, res = pcall(function() return tl:TotallyMadeUpFunction() end)
+print('calling fake:', ok2, res)
+print('timeline:', tl:GetName(), 'items on V1:', #(tl:GetItemListInTrack('video', 1) or {}))

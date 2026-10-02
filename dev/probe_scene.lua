@@ -1,0 +1,12 @@
+local r = bmd.scriptapp('Resolve', 'localhost')
+local p = r:GetProjectManager():GetCurrentProject()
+local mp = p:GetMediaPool()
+local items = mp:ImportMedia({[[C:\Users\admin\Downloads\av-postpilot\dev\cuts_test.mp4]]})
+local tl = mp:CreateTimelineFromClips('SceneProbe ' .. os.time(), items)
+p:SetCurrentTimeline(tl)
+print('before', #tl:GetItemListInTrack('video', 1))
+local t0 = os.clock(); local w0 = os.time()
+local ok = tl:DetectSceneCuts()
+print('result', ok, 'wall s', os.time() - w0)
+print('after', #tl:GetItemListInTrack('video', 1))
+for _, it in ipairs(tl:GetItemListInTrack('video', 1)) do print('  ', it:GetStart(), it:GetEnd()) end

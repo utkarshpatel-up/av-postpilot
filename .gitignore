@@ -1,0 +1,12 @@
+node_modules/
+dist/
+build/builder-debug.yml
+
+# dev/: keep the probe and live-test scripts, not the test footage/renders
+dev/*
+!dev/*.js
+!dev/*.lua
+
+*.log
+.DS_Store
+Thumbs.db

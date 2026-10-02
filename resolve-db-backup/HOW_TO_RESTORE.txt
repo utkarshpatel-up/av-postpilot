@@ -1,0 +1,121 @@
+=====================================================================
+  DAVINCI RESOLVE - HOW TO RESTORE DELETED PROJECTS FROM BACKUP
+=====================================================================
+
+The live library (edit_share_18) is NEVER touched by a restore.
+You restore a backup into a separate "restore_..." library, take the
+projects you need from it as .drp, and import them into the live one.
+
+Backups run automatically at 11:00, 14:00, 17:00, 20:00, 23:00.
+  Mac:  /Users/ambavideo/ResolveBackup/db/<library>/
+  NAS:  Nasshare02/Editing/Utkarsh/Premiere Project Files/
+        Project Database Backup/<library>/
+  If projects suddenly disappear, the last good backup is also copied to
+  /Users/ambavideo/ResolveBackup/PROTECTED/  (and _PROTECTED on the NAS)
+
+
+---------------------------------------------------------------------
+STEP 1 - Find the backup you want                      (Mac, Terminal)
+---------------------------------------------------------------------
+Paste this and press Enter:
+
+  ~/ResolveBackup/scripts/resolve_db_restore.sh
+
+It lists the newest backups. File names show date and time:
+  edit_share_18_2026-10-01_1100.dump  =  1 Oct 2026 at 11:00
+
+Pick the newest one from BEFORE the projects went missing.
+Use the edit_share_18 files (edit_share_temp is an empty library).
+Check PROTECTED first: if a file is there, that's usually the one.
+
+
+---------------------------------------------------------------------
+STEP 2 - Create an empty restore library        (Project Server app)
+---------------------------------------------------------------------
+  1. Create a new library named e.g.  restore_check
+     (name MUST start with restore_ , lowercase, no spaces)
+  2. Open it and switch "Project Library Enabled" ON
+  3. Make sure nobody has it open in Resolve (on any machine)
+
+
+---------------------------------------------------------------------
+STEP 3 - Restore                                       (Mac, Terminal)
+---------------------------------------------------------------------
+The command is ONE line with THREE parts separated by spaces:
+
+  [script]  [ONE backup file]  [restore library name]
+
+Template (change only the date/time part):
+
+  ~/ResolveBackup/scripts/resolve_db_restore.sh ~/ResolveBackup/db/edit_share_18/edit_share_18_2026-10-01_1100.dump restore_check
+
+TIPS so the path never gets mixed up:
+  - Type it in a text editor first, check it, then paste the whole line.
+  - Or use TAB: type
+        ~/ResolveBackup/scripts/resolve_db_restore.sh ~/ResolveBackup/db/edit_share_18/edit_share_18_2026-10
+    and press TAB to complete the file name, then add  restore_check
+  - Never paste a second path into the same line.
+  - Never start the line with the .dump file ("permission denied").
+
+Success looks like:
+  Restored 'restore_check' with N project(s).
+  Replaced the Project Server library: ...
+
+
+---------------------------------------------------------------------
+STEP 4 - Get the projects back            (Windows PC with Resolve 20)
+---------------------------------------------------------------------
+  1. Project Manager > Network > restore_check
+     If not listed: Add Project Library > Connect
+        Name:      restore_check
+        Location:  192.168.60.136
+        Username:  postgres
+        Password:  DaVinci
+  2. Right-click the project you need > Export Project > save the .drp
+  3. Switch to edit_share_18 > right-click > Import Project > pick the .drp
+  4. Open it and check timelines, grades and media.
+
+  Always do this on a Resolve 20 PC. The Mac (Resolve 18.6) cannot open
+  projects made in Resolve 20 (it shows them with a warning icon).
+
+
+---------------------------------------------------------------------
+STEP 5 - Clean up
+---------------------------------------------------------------------
+  1. Remove restore_check from the library list in Resolve (every PC)
+  2. Delete restore_check in the Project Server app
+
+
+---------------------------------------------------------------------
+IF SOMETHING GOES WRONG
+---------------------------------------------------------------------
+"is open in Resolve somewhere"
+    -> Switch to another library / close Resolve on all machines, retry.
+
+"must start with restore_"
+    -> Use a name like restore_check. It never writes into live libraries.
+
+"no such file or directory"
+    -> The backup path is wrong. Re-check Step 3 (one path only).
+
+"Could not replace ... kept as 'restore_check_tmp...'"
+    -> Something still had it open. Data is safe in the _tmp copy.
+
+"Cannot connect to Network Project Library" (Windows)
+    -> Project Server: switch Project Library Enabled OFF and ON, retry.
+
+"Cannot reach PostgreSQL"
+    -> Restart the Mac, check the NAS is mounted, retry.
+
+Library looks empty on the Mac but fine on Windows
+    -> Normal display delay. Click another library and back.
+
+
+---------------------------------------------------------------------
+HEALTH CHECK (anytime)
+---------------------------------------------------------------------
+See what the last backups did:
+
+  tail -n 20 ~/ResolveBackup/backup.log
+
+Every run should say  OK edit_share_18 projects=N
