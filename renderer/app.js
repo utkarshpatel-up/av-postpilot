@@ -244,17 +244,32 @@ $('l-open').addEventListener('click', () => pilot.openLog());
 let days = [];   // scan results
 
 // Folder template, remembered in settings for every new project.
+// "Satsang Files" is required unless footage is left where it is.
+const footageMode = () => document.querySelector('input[name=n-move]:checked')?.value || 'move';
+const isSatsang = (f) => f.toLowerCase() === 'satsang files';
 function projectFolderList() {
   const list = [...(settings.project.folders || [])];
-  if (!list.some((f) => f.toLowerCase() === 'satsang files')) list.push('Satsang Files');
+  if (footageMode() !== 'leave' && !list.some(isSatsang)) list.push('Satsang Files');
   return list;
 }
 $('n-folders').addEventListener('click', (e) => {
   const b = e.target.closest('[data-del-folder]');
   if (!b) return;
   const name = b.dataset.delFolder;
+  if (isSatsang(name) && footageMode() !== 'leave') {
+    toast('Satsang Files can only be removed with "Leave where it is": the footage is moved or copied into that folder.', true);
+    return;
+  }
   save((s) => { s.project.folders = projectFolderList().filter((f) => f !== name); });
 });
+document.querySelectorAll('input[name=n-move]').forEach((r) => r.addEventListener('change', () => {
+  const back = r.value !== 'leave' && !(settings.project.folders || []).some(isSatsang);
+  save((s) => {
+    s.project.footage = r.value;
+    if (back) s.project.folders = [...(s.project.folders || []), 'Satsang Files'];
+  });
+  if (back) toast('Satsang Files is back in the folder list: footage is moved or copied into it');
+}));
 function addProjectFolder() {
   const name = $('n-folder-new').value.trim();
   if (!name) return;
@@ -275,9 +290,8 @@ function projectRoot() {
 function renderNewProject() {
   const root = projectRoot();
   $('n-root').textContent = root || '—';
-  $('n-folders').innerHTML = projectFolderList().map((f) => (f.toLowerCase() === 'satsang files'
-    ? `<span class="chip" title="Always made: the footage goes here">${esc(f)}</span>`
-    : `<span class="chip">${esc(f)} <button class="chip-x" data-del-folder="${esc(f)}" title="Remove from the template">✕</button></span>`)).join('');
+  // Every folder can be removed; Satsang Files only with "Leave where it is" (the click explains why).
+  $('n-folders').innerHTML = projectFolderList().map((f) => `<span class="chip">${esc(f)} <button class="chip-x" data-del-folder="${esc(f)}" title="${isSatsang(f) && footageMode() !== 'leave' ? 'Needed: footage is moved or copied here' : 'Remove from the template'}">✕</button></span>`).join('');
   $('n-days').innerHTML = days.length
     ? days.map((d, i) => `
       <div class="day">
@@ -318,16 +332,18 @@ $('n-days').addEventListener('click', (e) => {
   renderNewProject();
 });
 $('n-create').addEventListener('click', async () => {
-  const move = document.querySelector('input[name=n-move]:checked').value === 'move';
+  const footage = footageMode();
   const usable = days.filter((d) => d.sessions.length);
   if (!usable.length) return toast('Add at least one satsang folder with clips', true);
   const root = projectRoot();
   if (!root) return toast('Enter the project name and location', true);
-  const how = move ? 'move (same drive) or copy (other drive)' : 'copy';
-  if (!confirm(`Create "${$('n-name').value.trim()}"?\n\nThis will ${how} ${usable.length} folder(s) into:\n${root}\\Satsang Files\n\nNothing is ever deleted. Then the project is created in Resolve.`)) return;
+  const what = footage === 'leave'
+    ? `use ${usable.length} folder(s) from where they are (nothing is moved or copied)`
+    : `${footage === 'move' ? 'move (same drive) or copy (other drive)' : 'copy'} ${usable.length} folder(s) into:\n${root}\\Satsang Files`;
+  if (!confirm(`Create "${$('n-name').value.trim()}"?\n\nThis will ${what}\n\nNothing is ever deleted. Then the project is created in Resolve.`)) return;
   $('n-create').disabled = true;
   $('n-progress').classList.remove('hidden');
-  const r = await pilot.createProject({ name: $('n-name').value, location: $('n-location').value.trim(), days: usable.map((d) => d.dir), move });
+  const r = await pilot.createProject({ name: $('n-name').value, location: $('n-location').value.trim(), days: usable.map((d) => d.dir), footage });
   $('n-create').disabled = false;
   if (r.ok) {
     $('n-progress-msg').textContent = `Done: ${r.imported} clip(s) imported, ${r.timelines.length} timeline(s) created${r.problems.length ? `, ${r.problems.length} warning(s), see Activity` : ''}`;
@@ -448,10 +464,67 @@ $('e-rows').addEventListener('click', (e) => {
   if (!erows.length) erows.push({ cue: '', count: 3 });
   renderRows(); previewSeries();
 });
-$('e-addrow').addEventListener('click', () => {
+// ------------------------------------------------------------------ series name suggestions
+// Inline completion: typing shows the rest of the first matching name selected;
+// Tab (or Enter) accepts it with the name's own spelling. The <datalist> dropdown
+// also offers every name that contains the typed text.
+let seriesNames = [];
+async function loadSeriesNames() {
+  const r = await pilot.seriesNames();
+  seriesNames = r.names;
+  $('e-names-info').textContent = `${r.names.length} series names for suggestions (${r.custom ? 'from your file' : 'built-in list'}). Type a few letters, Tab completes.`;
+  $('series-names').innerHTML = r.names.map((n) => `<option value="${esc(n)}">`).join('');
+}
+function suggestionFor(typed) {
+  if (!typed) return null;
+  const t = typed.toLowerCase();
+  const pool = [...seriesNames, ...seriesList.map((s) => s.series)];
+  return pool.find((n) => n.toLowerCase().startsWith(t) && n.length > typed.length) || null;
+}
+document.querySelectorAll('input.suggest').forEach((input) => {
+  input.addEventListener('input', (e) => {
+    if (!e.inputType || e.inputType.startsWith('delete')) return;     // let Backspace/Delete work normally
+    if (input.selectionStart !== input.value.length) return;          // only when typing at the end
+    const typed = input.value;
+    const match = suggestionFor(typed);
+    if (!match) return;
+    input.value = typed + match.slice(typed.length);
+    input.setSelectionRange(typed.length, match.length);
+    input.dataset.match = match;
+  });
+  input.addEventListener('keydown', (e) => {
+    const hasHint = input.selectionStart < input.selectionEnd && input.selectionEnd === input.value.length && input.dataset.match;
+    if (!hasHint || (e.key !== 'Tab' && e.key !== 'Enter')) return;
+    e.preventDefault();
+    input.value = input.dataset.match;                                // the list's own capitals
+    input.setSelectionRange(input.value.length, input.value.length);
+    delete input.dataset.match;
+    input.dispatchEvent(new Event('input'));
+    input.dispatchEvent(new Event('change'));
+  });
+});
+$('e-names-import').addEventListener('click', async () => {
+  const r = await pilot.importSeriesNames();
+  if (r.canceled) return;
+  if (!r.ok) return toast(r.error, true);
+  toast(`Series list updated: ${r.count} names`);
+  loadSeriesNames();
+});
+
+function addEpisodeRow() {
   erows.push({ cue: '', count: 1 });
   activeRow = erows.length - 1;
   renderRows(); previewSeries();
+  $('e-rows').querySelectorAll('.e-cue')[activeRow]?.focus();      // ready to type the next folder
+}
+$('e-addrow').addEventListener('click', addEpisodeRow);
+// Enter in the last row adds a new row; in other rows it jumps to the next row.
+$('e-rows').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || !e.target.matches('.e-cue, .e-count')) return;
+  e.preventDefault();
+  const i = Number(e.target.closest('.erow').dataset.i);
+  if (i === erows.length - 1) addEpisodeRow();
+  else $('e-rows').querySelectorAll('.e-cue')[i + 1]?.focus();
 });
 ['e-title', 'e-series', 'e-subtitle', 'e-start', 'e-size'].forEach((id) => $(id).addEventListener('input', previewSeries));
 ['e-same', 'e-shownum'].forEach((id) => $(id).addEventListener('change', previewSeries));
@@ -1039,13 +1112,14 @@ $('enc-after').addEventListener('change', (e) => save((s) => { s.encoder.afterQu
   renderSettingsForm();
   renderLog();
   $('n-location').value = settings.project.location || '';
-  document.querySelector(`input[name=n-move][value=${settings.project.move === false ? 'copy' : 'move'}]`).checked = true;
+  document.querySelector(`input[name=n-move][value=${['move', 'copy', 'leave'].includes(settings.project.footage) ? settings.project.footage : 'move'}]`).checked = true;
   $('e-title').value = settings.series.title || '';
   $('e-subtitle').value = settings.series.subtitle || '';
   $('e-size').value = settings.series.size || 0.11;
   barsImage = settings.series.barsImage || '';
   document.querySelector(`input[name=e-bg][value=${settings.series.background === 'bars' ? 'bars' : 'plain'}]`).checked = true;
   renderBars();
+  loadSeriesNames();
   scene = init.scene;
   shutdownAt = init.shutdownAt;
   shutdownReason = init.shutdownReason || '';

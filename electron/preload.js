@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('pilot', {
   scanDays: (dirs) => ipcRenderer.invoke('scan-days', dirs),
   createProject: (args) => ipcRenderer.invoke('create-project', args),
   planSeries: (form) => ipcRenderer.invoke('plan-series', form),
+  seriesNames: () => ipcRenderer.invoke('series-names'),
+  importSeriesNames: () => ipcRenderer.invoke('import-series-names'),
   createSeries: (form) => ipcRenderer.invoke('create-series', form),
   listSeries: () => ipcRenderer.invoke('list-series'),
   planRename: (args) => ipcRenderer.invoke('plan-rename', args),

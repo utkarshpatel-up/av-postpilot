@@ -1,7 +1,7 @@
 {
   "name": "av-postpilot",
   "productName": "AV PostPilot",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Edit-bay assistant for DaVinci Resolve: automatic .drp backups, render actions and notifications",
   "main": "electron/main.js",
   "scripts": {
@@ -26,7 +26,14 @@
       "package.json"
     ],
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "build/icon.ico",
       "artifactName": "AV-PostPilot-${version}-Windows-Setup.${ext}"
     },
@@ -39,5 +46,8 @@
       "shortcutName": "Resolve + AV PostPilot",
       "runAfterFinish": false
     }
+  },
+  "dependencies": {
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   }
 }

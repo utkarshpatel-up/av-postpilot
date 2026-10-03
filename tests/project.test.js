@@ -141,3 +141,10 @@ test('project folder template: user list, Satsang Files always included, re-run 
   ps.createProjectFolders(loc, 'Edit-1 to 2', ['Audio', 'Graphics']);      // again: no error
   assert.deepStrictEqual(fs.readdirSync(root).sort(), ['Audio', 'Graphics', 'Satsang Files']);
 });
+
+test('Satsang Files can be left out only when footage stays where it is', () => {
+  assert.deepStrictEqual(ps.projectFolders(['Audio'], { needSatsang: true }), ['Audio', 'Satsang Files']);
+  assert.deepStrictEqual(ps.projectFolders(['Audio'], { needSatsang: false }), ['Audio']);
+  const root = ps.createProjectFolders(tmp(), 'Leave test', ['Audio'], { needSatsang: false });
+  assert.deepStrictEqual(fs.readdirSync(root), ['Audio']);
+});

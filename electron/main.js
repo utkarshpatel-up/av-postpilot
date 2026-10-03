@@ -12,6 +12,7 @@ const { RenderWatcher, copyVerified } = require('./renders');
 const { collectHdFiles } = require('./hdreview');
 const { SceneQueue } = require('./scenequeue');
 const { Encoder } = require('./encoder');
+const seriesList = require('./series-list');
 
 // Developer checks can run beside a normal copy with their own settings folder.
 if (process.env.AVPP_USERDATA) app.setPath('userData', process.env.AVPP_USERDATA);
@@ -35,8 +36,8 @@ const DEFAULTS = {
     skipUntitled: true,
     destinations: [],
   },
-  project: { location: '', move: true, folders: ['Audio', 'Resolve Export', 'Satsang Files', 'Scratch Disk'] },
-  series: { title: '', subtitle: '', font: 'Calibri', style: 'Bold', size: 0.11, background: 'plain', barsImage: '' },
+  project: { location: '', footage: 'move', folders: ['Audio', 'Resolve Export', 'Satsang Files', 'Scratch Disk'] },
+  series: { title: '', subtitle: '', font: 'Calibri', style: 'Bold', size: 0.11, background: 'plain', barsImage: '', names: null },   // names: null = built-in list
   renders: {
     copyEnabled: false, copyDest: '', afterQueue: 'nothing', shutdownSeconds: 60,
     hd: { enabled: false, preset: '', dir: '', suffix: '', onlyUhd: true, copyEnabled: false, copyDest: '' },
@@ -73,7 +74,8 @@ function mergeSettings(s) {
   return {
     ...DEFAULTS, ...s,
     autosave: { ...DEFAULTS.autosave, ...(s.autosave || {}) },
-    project: { ...DEFAULTS.project, ...(s.project || {}) },
+    // older versions stored move: true/false
+    project: { ...DEFAULTS.project, ...(s.project?.move === false ? { footage: 'copy' } : {}), ...(s.project || {}) },
     series: { ...DEFAULTS.series, ...(s.series || {}) },
     encoder: { ...DEFAULTS.encoder, ...(s.encoder || {}) },
     manual: { ...DEFAULTS.manual, ...(s.shutdownSeconds ? { shutdownSeconds: s.shutdownSeconds } : {}), ...(s.manual || {}) },
@@ -460,7 +462,10 @@ ipcMain.handle('scan-days', (_e, dirs) => dirs.map((d) => {
 }));
 
 let projectBusy = false;
-ipcMain.handle('create-project', async (_e, { name, location, days, move }) => {
+// footage: 'move' (same drive, else copy) | 'copy' | 'leave' (import from where it is)
+ipcMain.handle('create-project', async (_e, { name, location, days, footage }) => {
+  footage = ['move', 'copy', 'leave'].includes(footage) ? footage : 'move';
+  const move = footage === 'move';
   if (projectBusy) return { ok: false, error: 'A project is already being created' };
   projectBusy = true;
   const step = (msg, extra = {}) => { send('project-progress', { msg, ...extra }); log('info', msg); };
@@ -476,11 +481,13 @@ ipcMain.handle('create-project', async (_e, { name, location, days, move }) => {
     days = days.map((d) => (!fs.existsSync(d) && fs.existsSync(path.join(satsang, path.basename(d))) ? path.join(satsang, path.basename(d)) : d));
     for (const d of days) if (!fs.existsSync(d)) throw new Error(`Folder not found: ${d}`);
 
-    const root = ps.createProjectFolders(location, name, settings.project.folders);
+    const leave = footage === 'leave';
+    const root = ps.createProjectFolders(location, name, settings.project.folders, { needSatsang: !leave });
     step(`Created folders in ${root}`);
 
     const moved = [];
     for (const d of days) {
+      if (leave) { moved.push(d); continue; }        // footage stays where it is
       if (path.dirname(path.resolve(d)).toLowerCase() === satsang.toLowerCase()) { moved.push(d); continue; }   // already there
       step(`Bringing in ${path.basename(d)}…`);
       const r = await ps.transferFolder(d, satsang, {
@@ -498,7 +505,7 @@ ipcMain.handle('create-project', async (_e, { name, location, days, move }) => {
     step(`Creating Resolve project "${name}" and importing footage…`);
     const res = await bridge.setupProject({ project: name, bins: ps.BINS, dirs, timelines });
     if (!res.ok) throw new Error(res.error);
-    settings = mergeSettings({ ...settings, project: { ...settings.project, location, move } });
+    settings = mergeSettings({ ...settings, project: { ...settings.project, location, footage } });
     writeJson(SETTINGS_FILE, settings);
     step(`Project "${name}" ready: ${res.imported} clip(s), ${res.timelines.length} timeline(s)`);
     notifier.notify('projectCreated', `🆕 Project created: ${name}\n${res.timelines.join(', ')}`);
@@ -589,6 +596,24 @@ ipcMain.handle('shutdown-now', () => scheduleShutdown('manual', countdown(settin
 
 ipcMain.handle('plan-series', (_e, form) => ep.planSeries(form));
 
+// Series-name suggestions: the imported list, or the built-in one.
+ipcMain.handle('series-names', () => ({ names: settings.series.names || seriesList.DEFAULT_NAMES, custom: Boolean(settings.series.names) }));
+ipcMain.handle('import-series-names', async () => {
+  const r = await dialog.showOpenDialog(win, {
+    title: 'Series list (first column = series names)', properties: ['openFile'],
+    filters: [{ name: 'Spreadsheet', extensions: ['csv', 'xlsx', 'xls'] }],
+  });
+  if (r.canceled) return { ok: false, canceled: true };
+  try {
+    const names = seriesList.readSeriesFile(r.filePaths[0]);
+    applySettings({ ...settings, series: { ...settings.series, names } });
+    log('info', `Series list updated from ${path.basename(r.filePaths[0])}: ${names.length} name(s)`);
+    return { ok: true, count: names.length, names };
+  } catch (err) {
+    return { ok: false, error: `Could not read ${path.basename(r.filePaths[0])}: ${err.message}` };
+  }
+});
+
 ipcMain.handle('create-series', async (_e, form) => {
   if (!status.connected || !status.project) return { ok: false, error: 'Open the project in Resolve first' };
   const episodes = ep.planSeries(form);
@@ -664,6 +689,7 @@ app.whenReady().then(async () => {
   // Developer check: AVPP_SCREENSHOT=<folder> saves a picture of every page.
   if (process.env.AVPP_SCREENSHOT) {
     setTimeout(async () => {
+      if (process.env.AVPP_MAXIMIZE) { win.maximize(); await new Promise((r) => setTimeout(r, 800)); }
       // AVPP_EVAL_FILE: page code to run first (developer checks only)
       if (process.env.AVPP_EVAL_FILE) {
         const out = await win.webContents.executeJavaScript(fs.readFileSync(process.env.AVPP_EVAL_FILE, 'utf8')).catch((e) => `error: ${e.message}`);

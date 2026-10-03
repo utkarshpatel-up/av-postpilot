@@ -156,18 +156,19 @@ async function transferFolder(src, destParent, { move = true, onProgress = () =>
   return { dest, moved: false };
 }
 
-// folders: the user's template (Settings → New Project). "Satsang Files" is
-// always made because the footage goes there. Re-running is fine (no errors
-// for folders that already exist).
-function projectFolders(folders) {
-  const list = (folders && folders.length ? folders : PROJECT_FOLDERS).map((f) => String(f).trim()).filter(Boolean);
-  if (!list.some((f) => f.toLowerCase() === 'satsang files')) list.push('Satsang Files');
+// folders: the user's template (New Project page). "Satsang Files" is added
+// whenever footage is moved/copied into it (needSatsang); when footage is left
+// where it is, the template decides. Re-running is fine.
+function projectFolders(folders, { needSatsang = true } = {}) {
+  const list = (Array.isArray(folders) ? folders : PROJECT_FOLDERS).map((f) => String(f).trim()).filter(Boolean);
+  if (needSatsang && !list.some((f) => f.toLowerCase() === 'satsang files')) list.push('Satsang Files');
   return [...new Set(list)];
 }
 
-function createProjectFolders(location, projectName, folders) {
+function createProjectFolders(location, projectName, folders, opts) {
   const root = path.join(location, projectName);
-  for (const f of projectFolders(folders)) fs.mkdirSync(path.join(root, f), { recursive: true });
+  fs.mkdirSync(root, { recursive: true });
+  for (const f of projectFolders(folders, opts)) fs.mkdirSync(path.join(root, f), { recursive: true });
   return root;
 }
 

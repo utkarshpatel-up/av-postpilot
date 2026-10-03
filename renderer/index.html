@@ -105,7 +105,7 @@
         <div class="row">
           <input type="text" id="n-folder-new" placeholder="New folder name, e.g. Graphics">
           <button class="btn" id="n-folder-add">+ Add</button>
-          <span class="muted small">Your folder list is remembered for every new project. ✕ removes one; Satsang Files is always made.</span>
+          <span class="muted small">Your folder list is remembered for every new project. ✕ removes one; Satsang Files can only be removed with "Leave where it is".</span>
         </div>
       </div>
 
@@ -119,8 +119,9 @@
           <label>Footage</label>
           <label class="check inline-row"><input type="radio" name="n-move" value="move" checked> Move if on the same drive, otherwise copy</label>
           <label class="check inline-row"><input type="radio" name="n-move" value="copy"> Always copy</label>
+          <label class="check inline-row"><input type="radio" name="n-move" value="leave"> Leave where it is</label>
         </div>
-        <p class="muted small">Footage from another drive is always copied and the original is never deleted.</p>
+        <p class="muted small">Footage from another drive is always copied and the original is never deleted. <b>Leave where it is</b> imports the footage from its current folder; then the Satsang Files folder is optional in the template above.</p>
       </div>
 
       <div class="card">
@@ -139,12 +140,17 @@
       <div class="card">
         <div class="card-label">Create episode series</div>
         <div class="row">
+          <label></label>
+          <span class="muted small grow" id="e-names-info"></span>
+          <button class="btn" id="e-names-import">Update series list from file…</button>
+        </div>
+        <div class="row">
           <label for="e-title">Title line</label>
-          <input type="text" id="e-title" class="grow" placeholder="DD Hindi">
+          <input type="text" id="e-title" class="grow suggest" list="series-names" autocomplete="off" placeholder="DD Hindi (type, Tab completes)">
         </div>
         <div class="row">
           <label for="e-series">Series name</label>
-          <input type="text" id="e-series" class="grow" placeholder="Hindi Shibir">
+          <input type="text" id="e-series" class="grow suggest" list="series-names" autocomplete="off" placeholder="Hindi Shibir">
           <label class="check inline"><input type="checkbox" id="e-same"> Same as title line</label>
         </div>
         <div class="row">
@@ -174,10 +180,10 @@
         </div>
 
         <div class="card-head sub">
-          <div class="muted">How many episodes from which folder</div>
-          <button class="btn" id="e-addrow">+ Add row</button>
+          <div class="muted">How many episodes from which folder <span class="small">(Enter in the last row adds a new row)</span></div>
         </div>
         <div id="e-rows"></div>
+        <button class="btn add-row" id="e-addrow">+ Add row</button>
         <div class="muted small" id="e-cue-hint"></div>
 
         <div class="preview">
@@ -199,11 +205,11 @@
         </div>
         <div class="row">
           <label for="r-title">New title line</label>
-          <input type="text" id="r-title" class="grow" placeholder="DD Hindi">
+          <input type="text" id="r-title" class="grow suggest" list="series-names" autocomplete="off" placeholder="DD Hindi">
         </div>
         <div class="row">
           <label for="r-series">New series name</label>
-          <input type="text" id="r-series" class="grow">
+          <input type="text" id="r-series" class="grow suggest" list="series-names" autocomplete="off">
           <label class="check inline"><input type="checkbox" id="r-same" checked> Same as title line</label>
         </div>
         <div class="row">
@@ -500,6 +506,7 @@
     <div><strong>This PC shuts down in <span id="shutdown-left">1:00</span></strong><br><span class="small">The Resolve project is saved first.</span></div>
     <button class="btn" id="shutdown-cancel">Cancel shutdown</button>
   </div>
+  <datalist id="series-names"></datalist>
   <div class="toast hidden" id="toast"></div>
   <script src="app.js"></script>
 </body>
