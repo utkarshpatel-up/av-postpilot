@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const PROJECT_FOLDERS = ['Audio', 'Resolve Export', 'Reviewed Episode', 'Satsang Files', 'Scratch Disk', 'Titles'];
+const PROJECT_FOLDERS = ['Audio', 'Resolve Export', 'Satsang Files', 'Scratch Disk'];   // default template
 const BINS = ['Satsang Files', 'Sequence', 'Audio', 'Episode', 'Reviewed Episode'];
 const VIDEO_EXT = new Set(['.mov', '.mp4', '.mxf', '.mts', '.m2ts', '.avi', '.mkv', '.braw', '.r3d', '.crm']);
 const MEDIA_EXT = new Set([...VIDEO_EXT, '.wav', '.mp3', '.aac', '.m4a', '.aif', '.aiff', '.png', '.jpg', '.jpeg', '.tif', '.tiff', '.psd']);
@@ -156,16 +156,22 @@ async function transferFolder(src, destParent, { move = true, onProgress = () =>
   return { dest, moved: false };
 }
 
-function createProjectFolders(location, projectName) {
+// folders: the user's template (Settings → New Project). "Satsang Files" is
+// always made because the footage goes there. Re-running is fine (no errors
+// for folders that already exist).
+function projectFolders(folders) {
+  const list = (folders && folders.length ? folders : PROJECT_FOLDERS).map((f) => String(f).trim()).filter(Boolean);
+  if (!list.some((f) => f.toLowerCase() === 'satsang files')) list.push('Satsang Files');
+  return [...new Set(list)];
+}
+
+function createProjectFolders(location, projectName, folders) {
   const root = path.join(location, projectName);
-  if (fs.existsSync(path.join(root, 'Satsang Files')) && listDir(path.join(root, 'Satsang Files')).length) {
-    // allowed: re-running with more days
-  }
-  for (const f of PROJECT_FOLDERS) fs.mkdirSync(path.join(root, f), { recursive: true });
+  for (const f of projectFolders(folders)) fs.mkdirSync(path.join(root, f), { recursive: true });
   return root;
 }
 
 module.exports = {
   PROJECT_FOLDERS, BINS, dayNumber, sessionCode, sessionClips, scanDay, mediaTree,
-  transferFolder, createProjectFolders, clipNumber,
+  transferFolder, createProjectFolders, projectFolders, clipNumber,
 };

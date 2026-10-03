@@ -152,6 +152,8 @@ ul.plain { margin: 4px 0 0; padding-left: 18px; line-height: 1.9; color: var(--m
 .inline-code { font-family: Consolas, monospace; font-size: 12px; color: #c9cfda; user-select: text; word-break: break-all; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .chip { font-size: 11px; padding: 3px 9px; border-radius: 10px; background: var(--panel-2); border: 1px solid var(--line); color: var(--muted); }
+.chip .chip-x { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 0 0 0 4px; font-size: 11px; }
+.chip .chip-x:hover { color: var(--bad); }
 .day { border-top: 1px solid var(--line); padding: 10px 0; }
 .day:first-child { border-top: 0; }
 .day-head { display: flex; align-items: center; gap: 10px; }
@@ -200,7 +202,13 @@ button.chip:hover { color: var(--text); border-color: var(--accent); }
 
 /* ---------------- encoder */
 .enc-group { padding: 14px 16px; }
+.enc-group { cursor: default; }
+.enc-group.selected { border-color: #5a6170; box-shadow: inset 3px 0 0 var(--accent); }
 .enc-group.drop { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(232,84,58,.35) inset; }
+#page-encoder.drop-new #enc-groups::after {
+  content: "Drop here to start a new group"; display: block; margin-top: 10px; padding: 22px;
+  border: 2px dashed var(--accent); border-radius: 12px; text-align: center; color: var(--accent-2);
+}
 .enc-head { display: grid; grid-template-columns: 1.1fr 1.3fr 2fr .7fr auto; gap: 8px; align-items: center; }
 .enc-head input, .enc-head select { width: 100%; min-width: 0; }
 .enc-head .btns { display: flex; gap: 6px; }

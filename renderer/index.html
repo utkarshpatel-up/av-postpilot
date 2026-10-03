@@ -102,6 +102,11 @@
         </div>
         <div class="muted small">Folders created: <code class="inline-code" id="n-root">—</code></div>
         <div class="chips" id="n-folders"></div>
+        <div class="row">
+          <input type="text" id="n-folder-new" placeholder="New folder name, e.g. Graphics">
+          <button class="btn" id="n-folder-add">+ Add</button>
+          <span class="muted small">Your folder list is remembered for every new project. ✕ removes one; Satsang Files is always made.</span>
+        </div>
       </div>
 
       <div class="card">
@@ -155,6 +160,17 @@
           <label for="e-size">Title size</label>
           <input type="number" id="e-size" min="0.02" max="0.5" step="0.01">
           <span class="muted small">Text+ size (0.11 ≈ your current titles). Font: Calibri Bold.</span>
+        </div>
+        <div class="row">
+          <label>Background</label>
+          <label class="check inline-row"><input type="radio" name="e-bg" value="plain"> Plain (black)</label>
+          <label class="check inline-row"><input type="radio" name="e-bg" value="bars"> Colour bars</label>
+        </div>
+        <div class="row" id="e-bars-row">
+          <label>Colour bars picture</label>
+          <span class="grow muted small" id="e-bars-name"></span>
+          <button class="btn" id="e-bars-pick">Choose image…</button>
+          <button class="btn" id="e-bars-reset">Use Resolve's SMPTE bars</button>
         </div>
 
         <div class="card-head sub">
@@ -372,10 +388,12 @@
         <div class="row">
           <span class="muted small" id="enc-presets-info"></span>
           <button class="btn" id="enc-load-presets">Load presets</button>
-          <button class="btn primary" id="enc-add-group">+ New group</button>
+          <button class="btn" id="enc-add-files">+ Add Files</button>
+          <button class="btn" id="enc-add-folder">+ Add Folder</button>
+          <button class="btn primary" id="enc-add-group">+ New Group</button>
         </div>
       </div>
-      <p class="lead">Convert any video with your Resolve presets, built-in or custom, like Media Encoder. Each group has one preset and output folder; any file can use its own instead. Drop files or folders onto a group. Each file keeps its own frame rate and size; temporary items in Resolve are removed afterwards.</p>
+      <p class="lead">Convert any video with your Resolve presets, built-in or custom, like Media Encoder. Each group has one preset and output folder; any file can use its own instead. Drop files onto a group to add them there, or anywhere else on this page to start a new group. Each file keeps its own frame rate and size; temporary items in Resolve are removed afterwards.</p>
 
       <div id="enc-groups"></div>
 
@@ -395,7 +413,7 @@
           <button class="btn" id="enc-stop">Stop after current</button>
           <button class="btn" id="enc-clear">Clear finished</button>
         </div>
-        <p class="muted small">Uses the project open in Resolve for temporary timelines. Resolve is busy while encoding.</p>
+        <p class="muted small">Uses the project open in Resolve for temporary timelines. Resolve is busy while encoding. <b>The queue is saved automatically</b> after every change, including when PostPilot or the PC is closed.</p>
       </div>
     </section>
 

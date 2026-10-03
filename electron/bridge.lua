@@ -263,6 +263,21 @@ local function series(a)
           tp:SetInput('Font', a.font or 'Calibri')
           tp:SetInput('Style', a.style or 'Bold')
           if a.size then tp:SetInput('Size', a.size) end
+          if a.centerY then tp:SetInput('Center', { 0.5, a.centerY }) end
+          if a.background and a.background ~= '' then
+            -- Picture (e.g. colour bars) behind the text, inside the same title:
+            -- Resolve's scripting can only insert titles/generators on V1.
+            local comp = tp.Composition
+            local out = comp:GetToolList(false, 'MediaOut')[1]
+            comp:Lock()
+            local loader = comp:AddTool('Loader', -32768, -32768)
+            loader.Clip = a.background
+            local merge = comp:AddTool('Merge', -32768, -32768)
+            merge.Background = loader.Output
+            merge.Foreground = tp.Output
+            if out then out.Input = merge.Output end
+            comp:Unlock()
+          end
           made[#made + 1] = e.name
         else
           problems[#problems + 1] = e.name .. ': title could not be added'
@@ -272,6 +287,35 @@ local function series(a)
   end
   pm:SaveProject()
   return { ok = true, made = made, skipped = skipped, problems = problems }
+end
+
+-- A still of Resolve's SMPTE colour bars at the project's resolution, made once
+-- per resolution and reused (a.dir is PostPilot's data folder).
+local function barsstill(a)
+  local r = connect()
+  local pm, p = project()
+  if not p then return { ok = false, error = 'No project open' } end
+  local w = p:GetSetting('timelineResolutionWidth') or '1920'
+  local h = p:GetSetting('timelineResolutionHeight') or '1080'
+  local path = a.dir .. '\\bars_smpte_' .. w .. 'x' .. h .. '.png'
+  local f = io.open(path, 'rb')
+  if f then f:close(); return { ok = true, path = path } end
+  local mp = p:GetMediaPool()
+  local previous = p:GetCurrentTimeline()
+  local tl = mp:CreateEmptyTimeline('PostPilot bars ' .. os.time())
+  if not tl then return { ok = false, error = 'could not create a temporary timeline' } end
+  p:SetCurrentTimeline(tl)
+  local gen = tl:InsertGeneratorIntoTimeline('SMPTE Color Bar')
+  local ok = false
+  if gen then
+    r:OpenPage('color'); bmd.wait(1.5)
+    tl:SetCurrentTimecode(tl:GetStartTimecode()); bmd.wait(1)
+    ok = p:ExportCurrentFrameAsStill(path)
+    r:OpenPage('edit')
+  end
+  mp:DeleteTimelines({ tl })
+  if previous then p:SetCurrentTimeline(previous) end
+  return { ok = ok == true, path = path, error = (ok ~= true) and 'could not make the colour bars picture' or nil }
 end
 
 local function timelines()
@@ -512,6 +556,7 @@ while true do
       elseif cmd == 'save' then return save()
       elseif cmd == 'setup' then return setup(parse(arg))
       elseif cmd == 'series' then return series(parse(arg))
+      elseif cmd == 'barsstill' then return barsstill(parse(arg))
       elseif cmd == 'timelines' then return timelines()
       elseif cmd == 'rename' then return rename(parse(arg))
       elseif cmd == 'detect' then return detect(parse(arg))

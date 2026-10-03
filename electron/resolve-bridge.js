@@ -112,6 +112,7 @@ class ResolveBridge {
   status() { return this.request('status', 15000); }
   setupProject(args) { return this.request(`setup\t${toLua(args)}`, 60 * 60 * 1000); }
   createSeries(args) { return this.request(`series\t${toLua(args)}`, 10 * 60 * 1000); }
+  barsStill(dir) { return this.request(`barsstill	${toLua({ dir })}`, 2 * 60 * 1000); }
   listTimelines() { return this.request('timelines', 30000); }
   renderPresets() { return this.request('presets', 30000); }
   startHdBatch(args) { return this.request(`hdbatch\t${toLua(args)}`, 30 * 60 * 1000); }

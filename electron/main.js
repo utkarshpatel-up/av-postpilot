@@ -35,8 +35,8 @@ const DEFAULTS = {
     skipUntitled: true,
     destinations: [],
   },
-  project: { location: '', move: true },
-  series: { title: '', subtitle: '', font: 'Calibri', style: 'Bold', size: 0.11 },
+  project: { location: '', move: true, folders: ['Audio', 'Resolve Export', 'Satsang Files', 'Scratch Disk'] },
+  series: { title: '', subtitle: '', font: 'Calibri', style: 'Bold', size: 0.11, background: 'plain', barsImage: '' },
   renders: {
     copyEnabled: false, copyDest: '', afterQueue: 'nothing', shutdownSeconds: 60,
     hd: { enabled: false, preset: '', dir: '', suffix: '', onlyUhd: true, copyEnabled: false, copyDest: '' },
@@ -476,7 +476,7 @@ ipcMain.handle('create-project', async (_e, { name, location, days, move }) => {
     days = days.map((d) => (!fs.existsSync(d) && fs.existsSync(path.join(satsang, path.basename(d))) ? path.join(satsang, path.basename(d)) : d));
     for (const d of days) if (!fs.existsSync(d)) throw new Error(`Folder not found: ${d}`);
 
-    const root = ps.createProjectFolders(location, name);
+    const root = ps.createProjectFolders(location, name, settings.project.folders);
     step(`Created folders in ${root}`);
 
     const moved = [];
@@ -498,7 +498,7 @@ ipcMain.handle('create-project', async (_e, { name, location, days, move }) => {
     step(`Creating Resolve project "${name}" and importing footage…`);
     const res = await bridge.setupProject({ project: name, bins: ps.BINS, dirs, timelines });
     if (!res.ok) throw new Error(res.error);
-    settings = mergeSettings({ ...settings, project: { location, move } });
+    settings = mergeSettings({ ...settings, project: { ...settings.project, location, move } });
     writeJson(SETTINGS_FILE, settings);
     step(`Project "${name}" ready: ${res.imported} clip(s), ${res.timelines.length} timeline(s)`);
     notifier.notify('projectCreated', `🆕 Project created: ${name}\n${res.timelines.join(', ')}`);
@@ -569,6 +569,10 @@ ipcMain.handle('encoder', async (_e, { action, args }) => {
     return { ok: false, error: err.message };
   }
 });
+ipcMain.handle('pick-image', async () => {
+  const r = await dialog.showOpenDialog(win, { title: 'Choose a colour bars picture', properties: ['openFile'], filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'tif', 'tiff', 'dpx', 'exr'] }] });
+  return r.canceled ? null : r.filePaths[0];
+});
 ipcMain.handle('pick-files', async (_e, current) => {
   const r = await dialog.showOpenDialog(win, {
     title: 'Add video files', defaultPath: current || undefined,
@@ -589,9 +593,24 @@ ipcMain.handle('create-series', async (_e, form) => {
   if (!status.connected || !status.project) return { ok: false, error: 'Open the project in Resolve first' };
   const episodes = ep.planSeries(form);
   if (!episodes.length) return { ok: false, error: 'Add at least one episode' };
-  settings = mergeSettings({ ...settings, series: { ...settings.series, title: form.title, subtitle: form.subtitle, size: form.size } });
+  settings = mergeSettings({ ...settings, series: { ...settings.series, title: form.title, subtitle: form.subtitle, size: form.size, background: form.background || 'plain', barsImage: form.barsImage || '' } });
   writeJson(SETTINGS_FILE, settings);
-  const res = await bridge.createSeries({ episodes, font: settings.series.font, style: settings.series.style, size: Number(form.size) || 0.11 });
+  // Colour bars: the user's own picture, or a still of Resolve's SMPTE bars.
+  let background = null;
+  if (form.background === 'bars') {
+    if (form.barsImage) {
+      if (!fs.existsSync(form.barsImage)) return { ok: false, error: `Colour bars picture not found: ${form.barsImage}` };
+      background = form.barsImage;
+    } else {
+      const b = await bridge.barsStill(DATA);
+      if (!b.ok) return { ok: false, error: b.error };
+      background = b.path;
+    }
+  }
+  const res = await bridge.createSeries({
+    episodes, font: settings.series.font, style: settings.series.style, size: Number(form.size) || 0.11,
+    background, centerY: background ? 0.6 : null,          // text in the upper bars, above the white/grey band
+  });
   if (res.ok) {
     log('info', `Created ${res.made.length} episode timeline(s) in "${status.project.name}"`);
     if (res.skipped.length) log('warn', `Already existed, skipped: ${res.skipped.join(', ')}`);
@@ -645,6 +664,11 @@ app.whenReady().then(async () => {
   // Developer check: AVPP_SCREENSHOT=<folder> saves a picture of every page.
   if (process.env.AVPP_SCREENSHOT) {
     setTimeout(async () => {
+      // AVPP_EVAL_FILE: page code to run first (developer checks only)
+      if (process.env.AVPP_EVAL_FILE) {
+        const out = await win.webContents.executeJavaScript(fs.readFileSync(process.env.AVPP_EVAL_FILE, 'utf8')).catch((e) => `error: ${e.message}`);
+        fs.writeFileSync(path.join(process.env.AVPP_SCREENSHOT, 'eval-result.txt'), String(out));
+      }
       for (const page of (process.env.AVPP_PAGES || 'dashboard,newproject,episodes,autosave').split(',')) {
         if (page === 'shutdown-test') {
           // Countdown banner + Cancel button. The app quits seconds later, so even

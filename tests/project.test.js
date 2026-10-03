@@ -131,3 +131,13 @@ test('rename keeps the bracket part exactly, even a broken one', () => {
   assert.strictEqual(plan[4].line1, 'DD Hindi - 1754');
   assert.strictEqual(plan[0].subtitle, null);
 });
+
+test('project folder template: user list, Satsang Files always included, re-run safe', () => {
+  assert.deepStrictEqual(ps.projectFolders(), ['Audio', 'Resolve Export', 'Satsang Files', 'Scratch Disk']);
+  assert.deepStrictEqual(ps.projectFolders(['Audio', 'Graphics']), ['Audio', 'Graphics', 'Satsang Files']);
+  assert.deepStrictEqual(ps.projectFolders(['Audio', 'satsang files', 'Audio']), ['Audio', 'satsang files']);
+  const loc = tmp();
+  const root = ps.createProjectFolders(loc, 'Edit-1 to 2', ['Audio', 'Graphics']);
+  ps.createProjectFolders(loc, 'Edit-1 to 2', ['Audio', 'Graphics']);      // again: no error
+  assert.deepStrictEqual(fs.readdirSync(root).sort(), ['Audio', 'Graphics', 'Satsang Files']);
+});

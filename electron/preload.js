@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('pilot', {
   shutdownNow: () => ipcRenderer.invoke('shutdown-now'),
   encoder: (action, args) => ipcRenderer.invoke('encoder', { action, args }),
   pickFiles: (current) => ipcRenderer.invoke('pick-files', current),
+  pickImage: () => ipcRenderer.invoke('pick-image'),
   // dropped files -> real paths (File.path no longer exists in Electron 32+)
   pathForFile: (file) => webUtils.getPathForFile(file),
   onEncoder: on('encoder'),

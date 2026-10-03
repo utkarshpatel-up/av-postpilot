@@ -36,6 +36,7 @@ async function save(mutate) {
   renderAutosaveForm();
   renderSettingsForm();
   renderRendersForm();
+  renderNewProject();
   renderDashboard();
 }
 
@@ -240,8 +241,30 @@ $('d-open-resolve').addEventListener('click', () => pilot.launchResolve());
 $('l-open').addEventListener('click', () => pilot.openLog());
 
 // ------------------------------------------------------------------ new project
-const FOLDERS = ['Audio', 'Resolve Export', 'Reviewed Episode', 'Satsang Files', 'Scratch Disk', 'Titles'];
 let days = [];   // scan results
+
+// Folder template, remembered in settings for every new project.
+function projectFolderList() {
+  const list = [...(settings.project.folders || [])];
+  if (!list.some((f) => f.toLowerCase() === 'satsang files')) list.push('Satsang Files');
+  return list;
+}
+$('n-folders').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-del-folder]');
+  if (!b) return;
+  const name = b.dataset.delFolder;
+  save((s) => { s.project.folders = projectFolderList().filter((f) => f !== name); });
+});
+function addProjectFolder() {
+  const name = $('n-folder-new').value.trim();
+  if (!name) return;
+  if (/[<>:"/\\|?*]/.test(name)) return toast('A folder name can\'t contain < > : " / \\ | ? *', true);
+  if (projectFolderList().some((f) => f.toLowerCase() === name.toLowerCase())) return toast('That folder is already in the list', true);
+  $('n-folder-new').value = '';
+  save((s) => { s.project.folders = [...projectFolderList(), name]; });
+}
+$('n-folder-add').addEventListener('click', addProjectFolder);
+$('n-folder-new').addEventListener('keydown', (e) => { if (e.key === 'Enter') addProjectFolder(); });
 
 function projectRoot() {
   const name = $('n-name').value.trim();
@@ -252,7 +275,9 @@ function projectRoot() {
 function renderNewProject() {
   const root = projectRoot();
   $('n-root').textContent = root || '—';
-  $('n-folders').innerHTML = FOLDERS.map((f) => `<span class="chip">${esc(f)}</span>`).join('');
+  $('n-folders').innerHTML = projectFolderList().map((f) => (f.toLowerCase() === 'satsang files'
+    ? `<span class="chip" title="Always made: the footage goes here">${esc(f)}</span>`
+    : `<span class="chip">${esc(f)} <button class="chip-x" data-del-folder="${esc(f)}" title="Remove from the template">✕</button></span>`)).join('');
   $('n-days').innerHTML = days.length
     ? days.map((d, i) => `
       <div class="day">
@@ -331,8 +356,35 @@ function seriesForm() {
     showNumber: $('e-shownum').checked,
     size: Number($('e-size').value) || 0.11,
     rows: erows.filter((r) => r.cue.trim() && Number(r.count) > 0),
+    background: document.querySelector('input[name=e-bg]:checked')?.value || 'plain',
+    barsImage,
   };
 }
+
+// Title background: plain black, or colour bars (Resolve's SMPTE bars or the user's picture).
+let barsImage = '';
+function renderBars() {
+  const bars = (document.querySelector('input[name=e-bg]:checked')?.value) === 'bars';
+  $('e-bars-row').classList.toggle('hidden', !bars);
+  $('e-bars-name').textContent = barsImage || 'Resolve SMPTE colour bars (made automatically at the project resolution)';
+  $('e-bars-reset').classList.toggle('hidden', !barsImage);
+}
+document.querySelectorAll('input[name=e-bg]').forEach((r) => r.addEventListener('change', () => {
+  renderBars();
+  save((s) => { s.series.background = r.value; });
+}));
+$('e-bars-pick').addEventListener('click', async () => {
+  const p = await pilot.pickImage();
+  if (!p) return;
+  barsImage = p;
+  renderBars();
+  save((s) => { s.series.barsImage = p; });
+});
+$('e-bars-reset').addEventListener('click', () => {
+  barsImage = '';
+  renderBars();
+  save((s) => { s.series.barsImage = ''; });
+});
 
 function renderRows() {
   $('e-rows').innerHTML = erows.map((r, i) => `
@@ -838,6 +890,7 @@ function renderEncoder() {
       row.querySelector('.i-info').textContent = it.output ? `→ ${it.output}` : it.info || it.file;
     }
   }
+  markSelected();
   const waiting = enc.groups.reduce((n, g) => n + g.items.filter((i) => i.state === 'waiting').length, 0);
   $('enc-start').disabled = enc.running || !waiting;
   $('enc-start').textContent = enc.running ? 'Encoding…' : `Start queue${waiting ? ` (${waiting})` : ''}`;
@@ -893,34 +946,75 @@ $('enc-groups').addEventListener('click', async (e) => {
   }
 });
 
-// Drag & drop files/folders onto a group card.
-$('enc-groups').addEventListener('dragover', (e) => {
+// ---- selected group: the target of + Add Files / + Add Folder
+let selectedGroup = null;
+function currentGroupId() {
+  if (enc.groups.some((g) => g.id === selectedGroup)) return selectedGroup;
+  return enc.groups.length ? enc.groups[enc.groups.length - 1].id : null;
+}
+function markSelected() {
+  const id = currentGroupId();
+  document.querySelectorAll('.enc-group').forEach((c) => c.classList.toggle('selected', c.dataset.g === id));
+}
+$('enc-groups').addEventListener('mousedown', (e) => {
   const card = e.target.closest('.enc-group');
-  if (!card) return;
-  e.preventDefault();
-  card.classList.add('drop');
+  if (card) { selectedGroup = card.dataset.g; markSelected(); }
 });
-$('enc-groups').addEventListener('dragleave', (e) => {
-  const card = e.target.closest('.enc-group');
-  if (card && !card.contains(e.relatedTarget)) card.classList.remove('drop');
-});
-$('enc-groups').addEventListener('drop', async (e) => {
-  const card = e.target.closest('.enc-group');
-  if (!card) return;
+
+// New group: same preset/folder as the selected one, so only what differs needs changing.
+async function newGroup() {
+  const from = enc.groups.find((g) => g.id === currentGroupId());
+  const r = await encCall('addGroup', { preset: from?.preset || '', dir: from?.dir || '' });
+  if (r.ok) { selectedGroup = r.result.id; markSelected(); }
+  return r.ok ? r.result.id : null;
+}
+async function addToGroup(groupId, paths) {
+  const id = groupId || currentGroupId() || await newGroup();
+  if (!id || !paths.length) return;
+  const r = await encCall('addPaths', { id, paths });
+  if (r.ok) {
+    selectedGroup = id;
+    markSelected();
+    toast(`${r.result.added} video file(s) added${r.result.skipped ? `, ${r.result.skipped} skipped (not video)` : ''}`);
+  }
+}
+
+// ---- drag & drop: onto a group = add to it; anywhere else on the page = new group
+const encPage = $('page-encoder');
+encPage.addEventListener('dragover', (e) => {
   e.preventDefault();
-  card.classList.remove('drop');
+  const card = e.target.closest('.enc-group');
+  document.querySelectorAll('.enc-group.drop').forEach((c) => { if (c !== card) c.classList.remove('drop'); });
+  if (card) card.classList.add('drop');
+  encPage.classList.toggle('drop-new', !card);
+});
+encPage.addEventListener('dragleave', (e) => {
+  if (!encPage.contains(e.relatedTarget)) {
+    encPage.classList.remove('drop-new');
+    document.querySelectorAll('.enc-group.drop').forEach((c) => c.classList.remove('drop'));
+  }
+});
+encPage.addEventListener('drop', async (e) => {
+  e.preventDefault();
+  encPage.classList.remove('drop-new');
+  document.querySelectorAll('.enc-group.drop').forEach((c) => c.classList.remove('drop'));
   const paths = [...e.dataTransfer.files].map((f) => pilot.pathForFile(f)).filter(Boolean);
   if (!paths.length) return;
-  const r = await encCall('addPaths', { id: card.dataset.g, paths });
-  if (r.ok) toast(`${r.result.added} video file(s) added${r.result.skipped ? `, ${r.result.skipped} skipped (not video)` : ''}`);
+  const card = e.target.closest('.enc-group');
+  await addToGroup(card ? card.dataset.g : await newGroup(), paths);
 });
-// Dropping outside a group must not open the file in the window.
+// Dropping anywhere else in the window must not open the file in it.
 document.addEventListener('dragover', (e) => e.preventDefault());
 document.addEventListener('drop', (e) => e.preventDefault());
 
-$('enc-add-group').addEventListener('click', async () => {
-  const last = enc.groups[enc.groups.length - 1];
-  await encCall('addGroup', { preset: last?.preset || '', dir: last?.dir || '' });
+$('enc-add-group').addEventListener('click', newGroup);
+$('enc-add-files').addEventListener('click', async () => {
+  const files = await pilot.pickFiles();
+  if (files.length) await addToGroup(null, files);
+});
+$('enc-add-folder').addEventListener('click', async () => {
+  const dir = await pilot.pickFolder();
+  if (dir) await addToGroup(null, [dir]);
 });
 $('enc-load-presets').addEventListener('click', () => loadPresets(false));
 $('enc-start').addEventListener('click', async () => {
@@ -949,6 +1043,9 @@ $('enc-after').addEventListener('change', (e) => save((s) => { s.encoder.afterQu
   $('e-title').value = settings.series.title || '';
   $('e-subtitle').value = settings.series.subtitle || '';
   $('e-size').value = settings.series.size || 0.11;
+  barsImage = settings.series.barsImage || '';
+  document.querySelector(`input[name=e-bg][value=${settings.series.background === 'bars' ? 'bars' : 'plain'}]`).checked = true;
+  renderBars();
   scene = init.scene;
   shutdownAt = init.shutdownAt;
   shutdownReason = init.shutdownReason || '';
