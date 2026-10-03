@@ -115,6 +115,9 @@ class ResolveBridge {
   listTimelines() { return this.request('timelines', 30000); }
   renderPresets() { return this.request('presets', 30000); }
   startHdBatch(args) { return this.request(`hdbatch\t${toLua(args)}`, 30 * 60 * 1000); }
+  encodeStart(args) { return this.request(`encstart\t${toLua(args)}`, 5 * 60 * 1000); }
+  jobStatus(id) { return this.request(`jobstatus\t${toLua({ id })}`, 30000); }
+  stopRendering() { return this.request('stoprender', 30000); }
   hdCleanup(args) { return this.request(`hdcleanup\t${toLua(args)}`, 5 * 60 * 1000); }
   detectSceneCuts(name) { return this.request(`detect\t${toLua({ name })}`, 6 * 60 * 60 * 1000); }
   renameSeries(args) { return this.request(`rename\t${toLua(args)}`, 10 * 60 * 1000); }

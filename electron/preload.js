@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const on = (channel) => (fn) => ipcRenderer.on(channel, (_e, payload) => fn(payload));
 
@@ -33,6 +33,11 @@ contextBridge.exposeInMainWorld('pilot', {
   shutdownCancel: () => ipcRenderer.invoke('shutdown-cancel'),
   renderPresets: () => ipcRenderer.invoke('render-presets'),
   shutdownNow: () => ipcRenderer.invoke('shutdown-now'),
+  encoder: (action, args) => ipcRenderer.invoke('encoder', { action, args }),
+  pickFiles: (current) => ipcRenderer.invoke('pick-files', current),
+  // dropped files -> real paths (File.path no longer exists in Electron 32+)
+  pathForFile: (file) => webUtils.getPathForFile(file),
+  onEncoder: on('encoder'),
   onScene: on('scene'),
   onRenders: on('renders'),
   onShutdown: on('shutdown'),

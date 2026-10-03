@@ -40,8 +40,9 @@ class RenderWatcher {
   // queue of episodes would look finished after the first one.
   // startHd(jobs) -> { ok, ids, problems, error }: queues the HD review renders.
   // finishHd(batch) -> { files, problems }: rename/copy HD files, remove temporary items.
-  constructor({ getSettings, notifier, log, onChange, onQueueDone, startHd, finishHd, settleMs = 15000 }) {
-    Object.assign(this, { getSettings, notifier, log, onChange, onQueueDone, startHd, finishHd, settleMs });
+  // ignore(id) -> true for jobs another feature (the Encoder) made: not episodes.
+  constructor({ getSettings, notifier, log, onChange, onQueueDone, startHd, finishHd, ignore, settleMs = 15000 }) {
+    Object.assign(this, { getSettings, notifier, log, onChange, onQueueDone, startHd, finishHd, ignore, settleMs });
     this.idleSince = null;
     this.hdIds = new Set();         // jobs PostPilot added for the HD pass
     this.seen = new Map();          // jobId -> last status
@@ -70,6 +71,7 @@ class RenderWatcher {
     }
     let changed = false;
     for (const j of status.jobs || []) {
+      if (this.ignore?.(j.id)) continue;
       const before = this.seen.get(j.id);
       this.seen.set(j.id, j.status);
       if (before === j.status || before === undefined) continue;

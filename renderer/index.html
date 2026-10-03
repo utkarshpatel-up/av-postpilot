@@ -23,11 +23,13 @@
       <button class="nav" data-page="autosave">
         <svg viewBox="0 0 24 24"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm3-10H5V5h10z"/></svg>Auto-save</button>
       <button class="nav" data-page="scene">
-        <svg viewBox="0 0 24 24"><path d="M9.6 7.6A4 4 0 1 0 6 10a4 4 0 0 0 1.6-.4L10 12l-2.4 2.4A4 4 0 1 0 9.6 16.4L12 14l7 7h3v-1zM6 8a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm0 12a2 2 0 1 1 0-4 2 2 0 0 1 0 4zM19 3l-6 6 2 2 7-7V3z"/></svg>Scene Edit<span class="soon hidden" id="nav-scene-badge"></span></button>
+        <svg viewBox="0 0 24 24"><path d="M9.6 7.6A4 4 0 1 0 6 10a4 4 0 0 0 1.6-.4L10 12l-2.4 2.4A4 4 0 1 0 9.6 16.4L12 14l7 7h3v-1zM6 8a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm0 12a2 2 0 1 1 0-4 2 2 0 0 1 0 4zM19 3l-6 6 2 2 7-7V3z"/></svg>Scene Cuts<span class="soon hidden" id="nav-scene-badge"></span></button>
       <button class="nav" data-page="episodes">
         <svg viewBox="0 0 24 24"><path d="M4 6H2v14a2 2 0 0 0 2 2h14v-2H4zm16-4H8a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zm-1 9h-4v4h-2v-4H9V9h4V5h2v4h4z"/></svg>Episodes</button>
       <button class="nav" data-page="renders">
         <svg viewBox="0 0 24 24"><path d="M4 4h16v12H4zm-2 14h20v2H2zM10 7v6l5-3z"/></svg>Renders</button>
+      <button class="nav" data-page="encoder">
+        <svg viewBox="0 0 24 24"><path d="M4 5h16v2H4zm0 4h10v2H4zm0 4h10v2H4zm0 4h16v2H4zm12-8 6 4-6 4z"/></svg>Encoder<span class="soon hidden" id="nav-enc-badge"></span></button>
       <button class="nav" data-page="notify">
         <svg viewBox="0 0 24 24"><path d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6V11a6 6 0 0 0-5-5.9V4a1 1 0 0 0-2 0v1.1A6 6 0 0 0 6 11v5l-2 2v1h16v-1z"/></svg>Notifications</button>
       <button class="nav" data-page="activity">
@@ -251,7 +253,7 @@
 
     <!-- ================================================= Scene cuts -->
     <section class="page" id="page-scene">
-      <h1>Scene Edit Detection</h1>
+      <h1>Scene Cut Queue</h1>
       <p class="lead">Runs Resolve's <em>Detect Scene Cuts</em> on several timelines one after another. Resolve is busy while it runs, so it suits lunch breaks or overnight.</p>
 
       <div class="card">
@@ -361,15 +363,39 @@
         <ul class="log" id="rn-copies"><li class="muted">None yet</li></ul>
       </div>
 
-      <div class="card">
-        <div class="card-label">Shut down</div>
+    </section>
+
+    <!-- ================================================= Encoder -->
+    <section class="page" id="page-encoder">
+      <div class="title-row">
+        <h1>Encoder</h1>
         <div class="row">
-          <button class="btn" id="rn-shutdown">Shut down this PC</button>
-          <span class="countdown" data-for="manual">after
+          <span class="muted small" id="enc-presets-info"></span>
+          <button class="btn" id="enc-load-presets">Load presets</button>
+          <button class="btn primary" id="enc-add-group">+ New group</button>
+        </div>
+      </div>
+      <p class="lead">Convert any video with your Resolve presets, built-in or custom, like Media Encoder. Each group has one preset and output folder; any file can use its own instead. Drop files or folders onto a group. Each file keeps its own frame rate and size; temporary items in Resolve are removed afterwards.</p>
+
+      <div id="enc-groups"></div>
+
+      <div class="card">
+        <div class="row">
+          <label for="enc-after">When the queue finishes</label>
+          <select id="enc-after">
+            <option value="nothing">Just notify</option>
+            <option value="shutdown">Notify and shut down this PC</option>
+          </select>
+          <span class="countdown" data-for="encoder">after
             <input type="number" class="cd-min" min="0" max="1440"> min
             <input type="number" class="cd-sec" min="0" max="59"> s</span>
         </div>
-        <p class="muted small">Saves the Resolve project first. Cancel from here, the Dashboard or the tray icon.</p>
+        <div class="row">
+          <button class="btn primary" id="enc-start">Start queue</button>
+          <button class="btn" id="enc-stop">Stop after current</button>
+          <button class="btn" id="enc-clear">Clear finished</button>
+        </div>
+        <p class="muted small">Uses the project open in Resolve for temporary timelines. Resolve is busy while encoding.</p>
       </div>
     </section>
 

@@ -11,6 +11,7 @@ const { Notifier, telegram, whapi } = require('./notify');
 const { RenderWatcher, copyVerified } = require('./renders');
 const { collectHdFiles } = require('./hdreview');
 const { SceneQueue } = require('./scenequeue');
+const { Encoder } = require('./encoder');
 
 // Developer checks can run beside a normal copy with their own settings folder.
 if (process.env.AVPP_USERDATA) app.setPath('userData', process.env.AVPP_USERDATA);
@@ -42,12 +43,13 @@ const DEFAULTS = {
   },
   scene: { afterQueue: 'nothing', shutdownSeconds: 60 },
   manual: { shutdownSeconds: 60 },
+  encoder: { afterQueue: 'nothing', shutdownSeconds: 60 },
   notify: {
     telegram: { enabled: false, chats: [] },
     whapi: { enabled: false, chats: [] },
     events: {
       renderDone: true, renderFailed: true, renderCopied: false, queueDone: true,
-      sceneDone: true, sceneQueueDone: true, shutdown: true, autosaveFailed: true, projectCreated: false,
+      sceneDone: true, sceneQueueDone: true, encoderGroupDone: true, encoderQueueDone: true, shutdown: true, autosaveFailed: true, projectCreated: false,
     },
   },
 };
@@ -73,6 +75,7 @@ function mergeSettings(s) {
     autosave: { ...DEFAULTS.autosave, ...(s.autosave || {}) },
     project: { ...DEFAULTS.project, ...(s.project || {}) },
     series: { ...DEFAULTS.series, ...(s.series || {}) },
+    encoder: { ...DEFAULTS.encoder, ...(s.encoder || {}) },
     manual: { ...DEFAULTS.manual, ...(s.shutdownSeconds ? { shutdownSeconds: s.shutdownSeconds } : {}), ...(s.manual || {}) },
     renders: { ...DEFAULTS.renders, ...(s.shutdownSeconds ? { shutdownSeconds: s.shutdownSeconds } : {}), ...(s.renders || {}), hd: { ...DEFAULTS.renders.hd, ...(s.renders?.hd || {}) } },
     // older versions had one shared countdown
@@ -265,12 +268,14 @@ function cancelShutdown() {
 function sendShutdown() { send('shutdown', { at: shutdownAt, reason: shutdownReason }); }
 function afterQueue(action, what) {
   if (action !== 'shutdown') return;
-  const secs = countdown(what === 'scene cut queue' ? settings.scene.shutdownSeconds : settings.renders.shutdownSeconds);
+  const group = { 'scene cut queue': 'scene', 'encoder queue': 'encoder' }[what] || 'renders';
+  const secs = countdown(settings[group].shutdownSeconds);
   scheduleShutdown(`${what} finished`, secs);
 }
 
 const renders = new RenderWatcher({
   getSettings: () => settings, notifier, log,
+  ignore: (id) => encoder.ids.has(id),
   startHd: async (jobs) => {
     const hd = settings.renders.hd;
     if (!hd.preset) return { ok: false, error: 'no HD preset chosen on the Renders page' };
@@ -314,6 +319,14 @@ const renders = new RenderWatcher({
     return { files, problems };
   },
   onChange: () => send('renders', renders.summary()),
+  onQueueDone: afterQueue,
+});
+
+const encoder = new Encoder({
+  bridge, notifier, log, getSettings: () => settings,
+  loadState: () => state.encoder,
+  saveState: (e) => { state.encoder = e; writeJson(STATE_FILE, state); },
+  onChange: () => { send('encoder', encoder.summary()); updateTray(); },
   onQueueDone: afterQueue,
 });
 
@@ -403,7 +416,7 @@ function applySettings(next) {
 // ------------------------------------------------------------------ IPC
 ipcMain.handle('get-initial', () => ({
   settings, status, autosave: autosaver.summary(), log: logLines,
-  scene: sceneQueue.summary(), renders: renders.summary(), shutdownAt, shutdownReason,
+  scene: sceneQueue.summary(), encoder: encoder.summary(), renders: renders.summary(), shutdownAt, shutdownReason,
   pc: os.hostname(), version: app.getVersion(),
 }));
 ipcMain.handle('save-settings', (_e, next) => applySettings(next));
@@ -530,6 +543,40 @@ ipcMain.handle('scene-start', () => {
 });
 ipcMain.handle('scene-stop', () => sceneQueue.stop());
 ipcMain.handle('shutdown-cancel', () => cancelShutdown());
+
+// ------------------------------------------------------------------ encoder
+const ENC_ACTIONS = {
+  addGroup: (a) => encoder.addGroup(a),
+  updateGroup: (a) => encoder.updateGroup(a.id, a.fields),
+  removeGroup: (a) => encoder.removeGroup(a.id),
+  addPaths: (a) => encoder.addPaths(a.id, a.paths),
+  updateItem: (a) => encoder.updateItem(a.group, a.id, a.fields),
+  removeItem: (a) => encoder.removeItem(a.group, a.id),
+  clearFinished: () => encoder.clearFinished(),
+  stop: () => encoder.stop(),
+};
+ipcMain.handle('encoder', async (_e, { action, args }) => {
+  try {
+    if (action === 'start') {
+      if (!status.connected || !status.project) return { ok: false, error: 'Open a project in Resolve first (temporary items are made there and removed afterwards)' };
+      // Answer straight away: the queue can run for hours.
+      return Promise.race([encoder.start(), new Promise((r) => setTimeout(() => r({ ok: true, started: true }), 800))]);
+    }
+    const fn = ENC_ACTIONS[action];
+    if (!fn) return { ok: false, error: `unknown action ${action}` };
+    return { ok: true, result: await fn(args || {}) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+ipcMain.handle('pick-files', async (_e, current) => {
+  const r = await dialog.showOpenDialog(win, {
+    title: 'Add video files', defaultPath: current || undefined,
+    properties: ['openFile', 'multiSelections'],
+    filters: [{ name: 'Video', extensions: ['mov', 'mp4', 'mxf', 'm4v', 'avi', 'mkv', 'mts', 'm2ts', 'braw', 'r3d', 'crm', 'wmv', 'mpg', 'mpeg', 'webm'] }, { name: 'All files', extensions: ['*'] }],
+  });
+  return r.canceled ? [] : r.filePaths;
+});
 ipcMain.handle('render-presets', async () => {
   if (!status.connected || !status.project) return { ok: false, error: 'Open a project in Resolve first' };
   return bridge.renderPresets();

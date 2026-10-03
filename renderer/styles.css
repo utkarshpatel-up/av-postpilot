@@ -198,6 +198,30 @@ button.chip:hover { color: var(--text); border-color: var(--accent); }
 .countdown { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); white-space: nowrap; }
 .countdown input { width: 64px; }
 
+/* ---------------- encoder */
+.enc-group { padding: 14px 16px; }
+.enc-group.drop { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(232,84,58,.35) inset; }
+.enc-head { display: grid; grid-template-columns: 1.1fr 1.3fr 2fr .7fr auto; gap: 8px; align-items: center; }
+.enc-head input, .enc-head select { width: 100%; min-width: 0; }
+.enc-head .btns { display: flex; gap: 6px; }
+.enc-sub { display: grid; grid-template-columns: 1.1fr 1.3fr 2fr .7fr auto; gap: 8px; font-size: 11px; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: .6px; }
+.enc-path { display: flex; gap: 6px; min-width: 0; }
+.enc-path input { flex: 1; }
+table.enc { width: 100%; border-collapse: collapse; margin-top: 10px; table-layout: fixed; }
+.enc th { text-align: left; color: var(--muted); font-weight: 500; font-size: 12px; padding: 6px; border-bottom: 1px solid var(--line); }
+.enc td { padding: 6px; border-bottom: 1px solid #262a33; vertical-align: middle; font-size: 13px; overflow: hidden; }
+.enc tr:last-child td { border-bottom: 0; }
+.enc .fname { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+.enc .fname small, .enc .out small { display: block; color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.enc select { width: 100%; font-size: 12px; padding: 5px 6px; }
+.enc .out { display: flex; gap: 4px; align-items: center; min-width: 0; }
+.enc .out span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+.enc .out span.inherit { color: var(--muted); font-style: italic; }
+.enc .btn.icon { padding: 4px 8px; }
+.enc .state-cell { white-space: nowrap; }
+.enc .err { color: var(--bad); font-size: 11px; white-space: normal; }
+.enc-empty { color: var(--muted); padding: 18px; text-align: center; border: 1px dashed var(--line); border-radius: 8px; margin-top: 10px; }
+
 .toast {
   position: fixed; bottom: 22px; right: 26px; max-width: 420px; background: var(--panel-2);
   border: 1px solid var(--line); border-left: 4px solid var(--ok); border-radius: 10px;

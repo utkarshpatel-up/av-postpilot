@@ -441,6 +441,62 @@ local function hdcleanup(a)
   return { ok = ok == true, removed = #tls }
 end
 
+-- Encoder: one file -> one temporary timeline that matches the file's own frame
+-- rate and size (so nothing is retimed or reframed), rendered with a preset as a
+-- single clip named exactly as asked. Temporary items live in bin a.folder and
+-- are removed afterwards with hdcleanup.
+local function encstart(a)
+  local _, p = project()
+  if not p then return { ok = false, error = 'No project open in Resolve' } end
+  local mp = p:GetMediaPool()
+  local root = mp:GetRootFolder()
+  local folder
+  for _, f in ipairs(root:GetSubFolderList() or {}) do if f:GetName() == a.folder then folder = f end end
+  folder = folder or mp:AddSubFolder(root, a.folder)
+  if not folder then return { ok = false, error = 'could not create a temporary bin' } end
+  mp:SetCurrentFolder(folder)
+  local got = mp:ImportMedia({ a.file })
+  local clip = got and got[1]
+  if not clip then return { ok = false, error = 'Resolve could not import this file' } end
+  local fps = clip:GetClipProperty('FPS')
+  local w, h = string.match(clip:GetClipProperty('Resolution') or '', '(%d+)%s*x%s*(%d+)')
+  local tl = mp:CreateEmptyTimeline(a.timeline)
+  if not tl then return { ok = false, error = 'could not create a temporary timeline' } end
+  tl:SetSetting('useCustomSettings', '1')
+  if fps and tostring(fps) ~= '' then tl:SetSetting('timelineFrameRate', tostring(fps)) end
+  if w then tl:SetSetting('timelineResolutionWidth', w); tl:SetSetting('timelineResolutionHeight', h) end
+  local previous = p:GetCurrentTimeline()
+  p:SetCurrentTimeline(tl)
+  local placed = mp:AppendToTimeline({ clip })
+  if not placed or #placed == 0 then return { ok = false, error = 'could not place the file on the timeline' } end
+  if not applyPreset(p, a.preset) then return { ok = false, error = 'could not load preset "' .. a.preset .. '"' } end
+  p:SetCurrentRenderMode(1)                             -- single clip
+  p:SetRenderSettings({ SelectAllFrames = true, TargetDir = a.dir, CustomName = a.name })
+  local id = p:AddRenderJob()
+  if previous then p:SetCurrentTimeline(previous) end
+  if not id then return { ok = false, error = 'Resolve could not add the render job' } end
+  if not p:StartRendering({ id }, false) then return { ok = false, error = 'Resolve did not start rendering' } end
+  return { ok = true, id = id, fps = fps, resolution = w and (w .. 'x' .. h) or nil }
+end
+
+local function jobstatus(a)
+  local _, p = project()
+  if not p then return { ok = false, error = 'No project open' } end
+  local s = p:GetRenderJobStatus(a.id)
+  if not s then return { ok = false, error = 'job not found' } end
+  local res = { ok = true, status = s.JobStatus, percent = s.CompletionPercentage, tookMs = s.TimeTakenToRenderInMs, error = s.Error }
+  for _, j in ipairs(p:GetRenderJobList() or {}) do
+    if j.JobId == a.id then res.dir = j.TargetDir; res.file = j.OutputFilename end
+  end
+  return res
+end
+
+local function stoprender()
+  local _, p = project()
+  if p then p:StopRendering() end
+  return { ok = true }
+end
+
 ---------------------------------------------------------------- main loop
 reply({ ok = true, ready = true })
 while true do
@@ -462,6 +518,9 @@ while true do
       elseif cmd == 'presets' then return presets()
       elseif cmd == 'hdbatch' then return hdbatch(parse(arg))
       elseif cmd == 'hdcleanup' then return hdcleanup(parse(arg))
+      elseif cmd == 'encstart' then return encstart(parse(arg))
+      elseif cmd == 'jobstatus' then return jobstatus(parse(arg))
+      elseif cmd == 'stoprender' then return stoprender()
       else return { ok = false, error = 'unknown command: ' .. cmd } end
     end)
     if not ok then res = { ok = false, error = tostring(res) } end

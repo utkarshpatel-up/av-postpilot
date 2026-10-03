@@ -47,6 +47,7 @@ function go(page) {
   if (page === 'newproject') renderNewProject();
   if (page === 'notify') renderNotify();
   if (page === 'renders') renderRendersForm();
+  if (page === 'encoder' && !presets.length && status.connected && status.project) loadPresets(true);
   if (page === 'scene' && status.connected && status.project) loadSceneTimelines();
   if (page === 'episodes') {
     $('e-project').textContent = status.project?.name || 'no project open';
@@ -549,8 +550,8 @@ function renderRendersForm() {
   $('rn-dest').value = r.copyDest;
   $('rn-after').value = r.afterQueue;
   $('s-after').value = settings.scene.afterQueue;
+  $('enc-after').value = settings.encoder.afterQueue;
   renderCountdowns();
-  $('rn-shutdown').textContent = 'Shut down this PC';
   renderShutdown();
   const hd = r.hd;
   $('hd-on').checked = hd.enabled;
@@ -612,7 +613,7 @@ function renderCountdowns() {
     const secs = settings[group].shutdownSeconds;
     el.querySelector('.cd-min').value = Math.floor(secs / 60);
     el.querySelector('.cd-sec').value = secs % 60;
-    const select = { scene: $('s-after'), renders: $('rn-after') }[group];   // manual: always shown
+    const select = { scene: $('s-after'), renders: $('rn-after'), encoder: $('enc-after') }[group];   // manual: always shown
     el.classList.toggle('hidden', Boolean(select) && select.value !== 'shutdown');
   });
 }
@@ -630,10 +631,6 @@ $('rn-browse').addEventListener('click', async () => {
   if (p) await save((s) => { s.renders.copyDest = p; });
 });
 $('rn-after').addEventListener('change', (e) => save((s) => { s.renders.afterQueue = e.target.value; }));
-$('rn-shutdown').addEventListener('click', () => {
-  if (confirm(`Shut down this PC after a ${fmtCountdown(settings.manual.shutdownSeconds)} countdown?
-The Resolve project is saved first. You can cancel during the countdown.`)) pilot.shutdownNow();
-});
 function renderCopies(r) {
   $('rn-copies').innerHTML = r.copies.length
     ? r.copies.slice().reverse().map((c) => `<li class="${c.state === 'failed' ? 'error' : ''}">
@@ -662,6 +659,7 @@ function renderShutdown() {
   // Not counting down: show what's planned.
   const plan = [];
   if (settings.renders.afterQueue === 'shutdown') plan.push(`after renders${settings.renders.hd.enabled ? ' + HD review' : ''} (${fmtCountdown(settings.renders.shutdownSeconds)} countdown)`);
+  if (settings.encoder.afterQueue === 'shutdown') plan.push(`after the encoder queue (${fmtCountdown(settings.encoder.shutdownSeconds)} countdown)`);
   if (settings.scene.afterQueue === 'shutdown') plan.push(`after the scene cut queue (${fmtCountdown(settings.scene.shutdownSeconds)} countdown)`);
   $('d-shutdown').textContent = plan.length ? 'Planned' : 'Not planned';
   $('d-shutdown-sub').textContent = plan.length ? `Shuts down ${plan.join(' and ')}` : 'Choose "shut down" on the Renders or Scene Cuts page';
@@ -677,6 +675,8 @@ const EVENTS = [
   ['renderFailed', 'A render or copy fails'],
   ['sceneDone', 'Scene cuts finish on a timeline'],
   ['sceneQueueDone', 'The scene cut queue finishes'],
+  ['encoderGroupDone', 'An encoder group finishes'],
+  ['encoderQueueDone', 'The encoder queue finishes'],
   ['shutdown', 'The PC is about to shut down'],
   ['autosaveFailed', 'Auto-save has a problem (e.g. NAS offline)'],
   ['projectCreated', 'A new project is created'],
@@ -756,6 +756,181 @@ $('nt-test').addEventListener('click', async () => {
   toast(r.ok ? `Test sent to ${r.sent} chat(s)` : r.error, !r.ok);
 });
 
+// ------------------------------------------------------------------ encoder
+let enc = { groups: [], running: false, stopping: false };
+let presets = [];                      // from Resolve, loaded on demand
+let encStructure = '';
+
+const encCall = async (action, args) => {
+  const r = await pilot.encoder(action, args);
+  if (!r.ok) toast(r.error, true);
+  return r;
+};
+
+async function loadPresets(quiet) {
+  const r = await pilot.renderPresets();
+  if (!r.ok) { if (!quiet) toast(r.error, true); return; }
+  presets = r.presets;
+  $('enc-presets-info').textContent = `${presets.length} presets from Resolve`;
+  encStructure = '';                   // force a full redraw with the new list
+  renderEncoder();
+}
+
+function presetOptions(selected, inheritLabel) {
+  const list = presets.includes(selected) || !selected ? presets : [selected, ...presets];
+  const first = inheritLabel !== undefined
+    ? `<option value="">${esc(inheritLabel)}</option>`
+    : `<option value="">${presets.length ? 'Choose a preset…' : 'Click "Load presets"'}</option>`;
+  return first + list.map((p) => `<option value="${esc(p)}" ${p === selected ? 'selected' : ''}>${esc(p)}</option>`).join('');
+}
+
+function encStatus(it) {
+  if (it.state === 'encoding') {
+    return `<span class="bar"><i style="width:${Math.round(it.pct || 0)}%"></i></span>${Math.round(it.pct || 0)}%`;
+  }
+  if (it.state === 'done') return `<span class="state done">Done</span>${it.tookMs ? ` <span class="muted small">${fmtSec(Math.round(it.tookMs / 1000))}</span>` : ''}`;
+  if (it.state === 'failed') return `<span class="state failed">Failed</span><div class="err">${esc(it.error || '')}</div>`;
+  return '<span class="state">Waiting</span>';
+}
+
+function renderEncoder() {
+  const key = JSON.stringify(enc.groups.map((g) => [g.id, g.name, g.preset, g.dir, g.suffix,
+    g.items.map((i) => [i.id, i.preset, i.dir, i.state === 'encoding'])]));
+  const box = $('enc-groups');
+  const typing = document.activeElement && box.contains(document.activeElement) && document.activeElement.tagName === 'INPUT';
+  if (key !== encStructure && !typing) {
+    encStructure = key;
+    box.innerHTML = enc.groups.length ? enc.groups.map((g) => `
+      <div class="card enc-group" data-g="${g.id}">
+        <div class="enc-sub"><span>Group</span><span>Preset</span><span>Output folder</span><span>Add to name</span><span></span></div>
+        <div class="enc-head">
+          <input type="text" class="g-name" value="${esc(g.name)}">
+          <select class="g-preset">${presetOptions(g.preset)}</select>
+          <div class="enc-path"><input type="text" class="g-dir" value="${esc(g.dir)}" placeholder="Output folder"><button class="btn g-browse">…</button></div>
+          <input type="text" class="g-suffix" value="${esc(g.suffix)}" placeholder="_HD">
+          <div class="btns">
+            <button class="btn g-files">+ Files</button>
+            <button class="btn g-folder">+ Folder</button>
+            <button class="btn icon g-del" title="Remove group">✕</button>
+          </div>
+        </div>
+        ${g.items.length ? `<table class="enc">
+          <colgroup><col style="width:34%"><col style="width:22%"><col style="width:24%"><col style="width:13%"><col style="width:7%"></colgroup>
+          <thead><tr><th>File</th><th>Preset</th><th>Output folder</th><th>Status</th><th></th></tr></thead>
+          <tbody>${g.items.map((it) => `
+            <tr data-i="${it.id}">
+              <td class="fname" title="${esc(it.file)}">${esc(it.file.split(/[\\/]/).pop())}<small class="i-info">${esc(it.output ? `→ ${it.output}` : it.info || it.file)}</small></td>
+              <td><select class="i-preset" ${it.state === 'encoding' ? 'disabled' : ''}>${presetOptions(it.preset, g.preset ? `Group: ${g.preset}` : 'Group preset')}</select></td>
+              <td><div class="out">${it.dir ? `<span title="${esc(it.dir)}">${esc(it.dir)}</span><button class="btn icon i-dir-reset" title="Use the group folder">↺</button>` : `<span class="inherit">Group folder</span>`}
+                <button class="btn icon i-dir" title="Own output folder">…</button></div></td>
+              <td class="state-cell">${encStatus(it)}</td>
+              <td>${it.state === 'encoding' ? '' : `${it.state !== 'waiting' ? '<button class="btn icon i-requeue" title="Encode again">↻</button>' : ''}<button class="btn icon i-del" title="Remove">✕</button>`}</td>
+            </tr>`).join('')}</tbody></table>`
+          : '<div class="enc-empty">Drop video files or folders here, or use + Files / + Folder</div>'}
+      </div>`).join('')
+      : '<div class="card enc-empty">No groups yet. Click <b>+ New group</b>, choose a preset and output folder, then add files.</div>';
+  } else {
+    // Only progress/status changed: update those cells, leave inputs alone.
+    for (const g of enc.groups) for (const it of g.items) {
+      const row = box.querySelector(`tr[data-i="${it.id}"]`);
+      if (!row) continue;
+      row.querySelector('.state-cell').innerHTML = encStatus(it);
+      row.querySelector('.i-info').textContent = it.output ? `→ ${it.output}` : it.info || it.file;
+    }
+  }
+  const waiting = enc.groups.reduce((n, g) => n + g.items.filter((i) => i.state === 'waiting').length, 0);
+  $('enc-start').disabled = enc.running || !waiting;
+  $('enc-start').textContent = enc.running ? 'Encoding…' : `Start queue${waiting ? ` (${waiting})` : ''}`;
+  $('enc-stop').disabled = !enc.running || enc.stopping;
+  $('enc-stop').textContent = enc.stopping ? 'Stopping after current…' : 'Stop after current';
+  const badge = $('nav-enc-badge');
+  badge.classList.toggle('hidden', !enc.running);
+  badge.textContent = enc.running ? 'running' : '';
+}
+
+const groupOf = (el) => el.closest('.enc-group')?.dataset.g;
+const itemOf = (el) => el.closest('tr[data-i]')?.dataset.i;
+
+$('enc-groups').addEventListener('change', (e) => {
+  const g = groupOf(e.target);
+  if (!g) return;
+  const t = e.target;
+  if (t.classList.contains('g-name')) encCall('updateGroup', { id: g, fields: { name: t.value.trim() || 'Group' } });
+  if (t.classList.contains('g-preset')) encCall('updateGroup', { id: g, fields: { preset: t.value } });
+  if (t.classList.contains('g-dir')) encCall('updateGroup', { id: g, fields: { dir: t.value.trim() } });
+  if (t.classList.contains('g-suffix')) encCall('updateGroup', { id: g, fields: { suffix: t.value } });
+  if (t.classList.contains('i-preset')) encCall('updateItem', { group: g, id: itemOf(t), fields: { preset: t.value } });
+});
+
+$('enc-groups').addEventListener('click', async (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  const g = groupOf(b);
+  const grp = enc.groups.find((x) => x.id === g);
+  if (b.classList.contains('g-browse')) {
+    const p = await pilot.pickFolder(grp?.dir);
+    if (p) encCall('updateGroup', { id: g, fields: { dir: p } });
+  } else if (b.classList.contains('g-files')) {
+    const files = await pilot.pickFiles();
+    if (files.length) encCall('addPaths', { id: g, paths: files });
+  } else if (b.classList.contains('g-folder')) {
+    const dir = await pilot.pickFolder();
+    if (dir) {
+      const r = await encCall('addPaths', { id: g, paths: [dir] });
+      if (r.ok) toast(`${r.result.added} video file(s) added`);
+    }
+  } else if (b.classList.contains('g-del')) {
+    if (!grp.items.length || confirm(`Remove group "${grp.name}" and its ${grp.items.length} file(s) from the queue?\n(The files themselves are not touched.)`)) encCall('removeGroup', { id: g });
+  } else if (b.classList.contains('i-dir')) {
+    const p = await pilot.pickFolder(grp?.dir);
+    if (p) encCall('updateItem', { group: g, id: itemOf(b), fields: { dir: p } });
+  } else if (b.classList.contains('i-dir-reset')) {
+    encCall('updateItem', { group: g, id: itemOf(b), fields: { dir: '' } });
+  } else if (b.classList.contains('i-requeue')) {
+    encCall('updateItem', { group: g, id: itemOf(b), fields: { requeue: true } });
+  } else if (b.classList.contains('i-del')) {
+    encCall('removeItem', { group: g, id: itemOf(b) });
+  }
+});
+
+// Drag & drop files/folders onto a group card.
+$('enc-groups').addEventListener('dragover', (e) => {
+  const card = e.target.closest('.enc-group');
+  if (!card) return;
+  e.preventDefault();
+  card.classList.add('drop');
+});
+$('enc-groups').addEventListener('dragleave', (e) => {
+  const card = e.target.closest('.enc-group');
+  if (card && !card.contains(e.relatedTarget)) card.classList.remove('drop');
+});
+$('enc-groups').addEventListener('drop', async (e) => {
+  const card = e.target.closest('.enc-group');
+  if (!card) return;
+  e.preventDefault();
+  card.classList.remove('drop');
+  const paths = [...e.dataTransfer.files].map((f) => pilot.pathForFile(f)).filter(Boolean);
+  if (!paths.length) return;
+  const r = await encCall('addPaths', { id: card.dataset.g, paths });
+  if (r.ok) toast(`${r.result.added} video file(s) added${r.result.skipped ? `, ${r.result.skipped} skipped (not video)` : ''}`);
+});
+// Dropping outside a group must not open the file in the window.
+document.addEventListener('dragover', (e) => e.preventDefault());
+document.addEventListener('drop', (e) => e.preventDefault());
+
+$('enc-add-group').addEventListener('click', async () => {
+  const last = enc.groups[enc.groups.length - 1];
+  await encCall('addGroup', { preset: last?.preset || '', dir: last?.dir || '' });
+});
+$('enc-load-presets').addEventListener('click', () => loadPresets(false));
+$('enc-start').addEventListener('click', async () => {
+  const r = await pilot.encoder('start');
+  if (!r.ok) toast(r.error, true);
+});
+$('enc-stop').addEventListener('click', () => encCall('stop'));
+$('enc-clear').addEventListener('click', () => encCall('clearFinished'));
+$('enc-after').addEventListener('change', (e) => save((s) => { s.encoder.afterQueue = e.target.value; }));
+
 // ------------------------------------------------------------------ start
 (async () => {
   const init = await pilot.getInitial();
@@ -782,6 +957,9 @@ $('nt-test').addEventListener('click', async () => {
   renderRendersForm();
   renderShutdown();
   pilot.onScene((s) => { scene = s; renderScene(); });
+  enc = init.encoder;
+  renderEncoder();
+  pilot.onEncoder((e) => { enc = e; renderEncoder(); });
   pilot.onRenders(renderCopies);
   pilot.onShutdown((s) => { shutdownAt = s.at; shutdownReason = s.reason || ''; renderShutdown(); });
   setInterval(renderShutdown, 500);
