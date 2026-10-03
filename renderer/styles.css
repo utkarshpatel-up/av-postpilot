@@ -237,3 +237,5 @@ table.enc { width: 100%; border-collapse: collapse; margin-top: 10px; table-layo
   padding: 12px 16px; box-shadow: 0 10px 30px rgba(0,0,0,.4);
 }
 .toast.bad { border-left-color: var(--bad); }
+details.more { margin-top: 6px; }
+details.more summary { cursor: pointer; padding: 4px 0; }

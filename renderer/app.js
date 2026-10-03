@@ -812,10 +812,14 @@ async function renderNotify() {
   const has = await pilot.hasSecrets();
   $('nt-tg-on').checked = n.telegram.enabled;
   $('nt-wa-on').checked = n.whapi.enabled;
-  for (const [k, id] of [['telegram', 'nt-tg-has'], ['whapi', 'nt-wa-has']]) {
+  $('nt-ntfy-on').checked = n.ntfy.enabled;
+  if (document.activeElement !== $('nt-ntfy-topic')) $('nt-ntfy-topic').value = n.ntfy.topic || '';
+  if (document.activeElement !== $('nt-ntfy-server')) $('nt-ntfy-server').value = n.ntfy.server || 'https://ntfy.sh';
+  for (const [k, id] of [['telegram', 'nt-tg-has'], ['whapi', 'nt-wa-has'], ['ntfy', 'nt-ntfy-has']]) {
     $(id).className = `pill ${has[k] ? 'ok' : 'bad'}`;
     $(id).textContent = has[k] ? 'Token saved' : 'No token';
   }
+  if (!has.ntfy) $('nt-ntfy-has').className = 'pill hidden';    // optional for ntfy
   renderChats('telegram', 'nt-tg-chats');
   renderChats('whapi', 'nt-wa-chats');
   $('nt-events').innerHTML = EVENTS.map(([k, label]) =>
@@ -862,6 +866,41 @@ for (const [kind, pre] of [['telegram', 'nt-tg'], ['whapi', 'nt-wa']]) {
     renderNotify();
   });
 }
+// ---- ntfy
+const NTFY_TOPIC = /^[-_A-Za-z0-9]{1,64}$/;
+$('nt-ntfy-on').addEventListener('change', (e) => {
+  if (e.target.checked && !NTFY_TOPIC.test(settings.notify.ntfy.topic || '')) {
+    e.target.checked = false;
+    return toast('Set a topic first (click "Make a private name")', true);
+  }
+  save((s) => { s.notify.ntfy.enabled = e.target.checked; });
+});
+$('nt-ntfy-topic').addEventListener('change', (e) => {
+  const t = e.target.value.trim();
+  if (t && !NTFY_TOPIC.test(t)) return toast('Topic: letters, numbers, - and _ only (up to 64)', true);
+  save((s) => { s.notify.ntfy.topic = t; if (!t) s.notify.ntfy.enabled = false; });
+});
+$('nt-ntfy-gen').addEventListener('click', () => {
+  const rnd = [...crypto.getRandomValues(new Uint8Array(6))].map((b) => 'abcdefghjkmnpqrstuvwxyz23456789'[b % 31]).join('');
+  const t = `av-studio-${rnd}`;
+  $('nt-ntfy-topic').value = t;
+  save((s) => { s.notify.ntfy.topic = t; });
+  toast(`Topic "${t}" saved. Subscribe to it in the ntfy app.`);
+});
+$('nt-ntfy-copy').addEventListener('click', async () => {
+  const t = $('nt-ntfy-topic').value.trim();
+  if (!t) return toast('No topic yet', true);
+  await navigator.clipboard.writeText(t);
+  toast('Topic copied');
+});
+$('nt-ntfy-server').addEventListener('change', (e) => save((s) => { s.notify.ntfy.server = e.target.value.trim() || 'https://ntfy.sh'; }));
+$('nt-ntfy-save').addEventListener('click', async () => {
+  await pilot.setSecret('ntfy', $('nt-ntfy-token').value);
+  $('nt-ntfy-token').value = '';
+  toast('Token saved (encrypted)');
+  renderNotify();
+});
+
 $('nt-wa-add').addEventListener('click', async () => {
   const id = $('nt-wa-phone').value.replace(/[^\d@.a-z]/gi, '');
   if (!id) return toast('Enter a number with country code, e.g. 919876543210', true);

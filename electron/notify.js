@@ -49,6 +49,20 @@ const whapi = {
   },
 };
 
+// ntfy: push notifications to the ntfy phone app (free, no account). Everyone
+// subscribed to the topic gets the alert. JSON publishing keeps emoji and any
+// language safe (HTTP headers can't carry them).
+const ntfy = {
+  send(server, topic, token, { title, message, tags, priority }) {
+    const base = String(server || 'https://ntfy.sh').replace(/\/+$/, '');
+    const headers = token ? { authorization: `Bearer ${token}` } : {};
+    return post(`${base}/`, { topic, title, message, tags, priority }, headers);
+  },
+};
+
+// Topic names: letters, digits, _ and - only, up to 64 characters.
+const validTopic = (t) => /^[-_A-Za-z0-9]{1,64}$/.test(String(t || ''));
+
 // Phone numbers: keep digits only (country code included, no "+").
 function normaliseWhapiTarget(to) {
   const t = String(to).trim();
@@ -78,6 +92,14 @@ class Notifier {
     if (n.whapi.enabled && wa) {
       for (const c of n.whapi.chats) jobs.push(['WhatsApp', c.name || c.id, () => whapi.send(wa, normaliseWhapiTarget(c.id), text)]);
     }
+    if (n.ntfy?.enabled && validTopic(n.ntfy.topic)) {
+      const lines = text.split('\n');
+      jobs.push(['ntfy', n.ntfy.topic, () => ntfy.send(n.ntfy.server, n.ntfy.topic, this.getSecret('ntfy'), {
+        title: lines[0].slice(0, 120),            // first line = notification title
+        message: lines.slice(1).join('\n') || lines[0],
+        priority: /⚠️|failed|shuts down|⏻/i.test(text) ? 4 : 3,
+      })]);
+    }
     let sent = 0;
     await Promise.all(jobs.map(async ([svc, who, fn]) => {
       try { await fn(); sent++; } catch (err) { this.log('warn', `${svc} message to ${who} failed: ${err.message}`); }
@@ -86,4 +108,4 @@ class Notifier {
   }
 }
 
-module.exports = { Notifier, telegram, whapi, normaliseWhapiTarget };
+module.exports = { Notifier, telegram, whapi, ntfy, validTopic, normaliseWhapiTarget };

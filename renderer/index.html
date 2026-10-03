@@ -430,6 +430,33 @@
 
       <div class="card">
         <label class="switch-row">
+          <span><strong>ntfy (phone push)</strong><br><span class="muted small">Free, no account, no monthly limit. Install the <b>ntfy</b> app (Android or iPhone) and subscribe to the topic below; everyone subscribed gets the alert. An Android phone can forward it to a WhatsApp group (see the guide).</span></span>
+          <input type="checkbox" class="switch" id="nt-ntfy-on">
+        </label>
+        <div class="row">
+          <label for="nt-ntfy-topic">Topic</label>
+          <input type="text" id="nt-ntfy-topic" class="grow" placeholder="e.g. av-studio-render-x7k2p9">
+          <button class="btn" id="nt-ntfy-gen">Make a private name</button>
+          <button class="btn" id="nt-ntfy-copy">Copy</button>
+        </div>
+        <p class="muted small">The topic name works like a password: anyone who knows it can read the alerts, so keep the random part. Use the <b>same topic on every editing PC</b> so the team gets all PCs' alerts in one place.</p>
+        <details class="more">
+          <summary class="muted small">Own ntfy server or access token (optional)</summary>
+          <div class="row">
+            <label for="nt-ntfy-server">Server</label>
+            <input type="text" id="nt-ntfy-server" class="grow" placeholder="https://ntfy.sh">
+          </div>
+          <div class="row">
+            <label for="nt-ntfy-token">Access token</label>
+            <input type="password" id="nt-ntfy-token" class="grow" placeholder="Only for a protected topic">
+            <button class="btn" id="nt-ntfy-save">Save token</button>
+            <span class="pill" id="nt-ntfy-has"></span>
+          </div>
+        </details>
+      </div>
+
+      <div class="card">
+        <label class="switch-row">
           <span><strong>Telegram</strong><br><span class="muted small">Free. Create a bot with <b>@BotFather</b> (send /newbot), paste its token here.</span></span>
           <input type="checkbox" class="switch" id="nt-tg-on">
         </label>

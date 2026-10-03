@@ -48,6 +48,7 @@ const DEFAULTS = {
   notify: {
     telegram: { enabled: false, chats: [] },
     whapi: { enabled: false, chats: [] },
+    ntfy: { enabled: false, server: 'https://ntfy.sh', topic: '' },
     events: {
       renderDone: true, renderFailed: true, renderCopied: false, queueDone: true,
       sceneDone: true, sceneQueueDone: true, encoderGroupDone: true, encoderQueueDone: true, shutdown: true, autosaveFailed: true, projectCreated: false,
@@ -85,6 +86,7 @@ function mergeSettings(s) {
     notify: {
       telegram: { ...DEFAULTS.notify.telegram, ...(s.notify?.telegram || {}) },
       whapi: { ...DEFAULTS.notify.whapi, ...(s.notify?.whapi || {}) },
+      ntfy: { ...DEFAULTS.notify.ntfy, ...(s.notify?.ntfy || {}) },
       events: { ...DEFAULTS.notify.events, ...(s.notify?.events || {}) },
     },
   };
@@ -520,7 +522,7 @@ ipcMain.handle('create-project', async (_e, { name, location, days, footage }) =
 });
 
 // ------------------------------------------------------------------ notifications
-ipcMain.handle('has-secrets', () => ({ telegram: Boolean(getSecret('telegram')), whapi: Boolean(getSecret('whapi')) }));
+ipcMain.handle('has-secrets', () => ({ telegram: Boolean(getSecret('telegram')), whapi: Boolean(getSecret('whapi')), ntfy: Boolean(getSecret('ntfy')) }));
 ipcMain.handle('set-secret', (_e, { kind, value }) => { setSecret(kind, String(value || '').trim()); return true; });
 ipcMain.handle('find-chats', async (_e, kind) => {
   const token = getSecret(kind);

@@ -279,3 +279,25 @@ test('HD review timelines are not treated as episodes', () => {
   const found = ep.findSeries(['DD Vitraag-8911 (1207)', 'DD Vitraag-8911 (1207).mov', 'Hindi Shibir-07 (2980M, 2980E)_v2.mov']);
   assert.deepStrictEqual(found.map((s) => [s.series, s.count]), [['DD Vitraag', 1]]);
 });
+
+test('ntfy: sent as JSON to the server with the topic, first line as title; skipped without a valid topic', async () => {
+  const calls = [];
+  const realFetch = global.fetch;
+  global.fetch = async (url, opts) => { calls.push({ url, body: JSON.parse(opts.body), auth: opts.headers.authorization }); return { ok: true, status: 200, text: async () => '{"id":"x"}' }; };
+  try {
+    let cfg = { telegram: { enabled: false, chats: [] }, whapi: { enabled: false, chats: [] }, ntfy: { enabled: true, server: 'https://ntfy.sh/', topic: 'av-studio-abc123' },
+      events: { queueDone: true } };
+    const n = new Notifier({ getSettings: () => ({ notify: cfg }), getSecret: (k) => (k === 'ntfy' ? 'tk_secret' : ''), log: () => {}, pc: 'EDIT-PC3' });
+    assert.strictEqual(await n.notify('queueDone', '🎬 Render finished: 2 job(s) done\n• EP 1.mov'), 1);
+    assert.strictEqual(calls[0].url, 'https://ntfy.sh/');
+    assert.deepStrictEqual([calls[0].body.topic, calls[0].body.title], ['av-studio-abc123', '🎬 Render finished: 2 job(s) done']);
+    assert.match(calls[0].body.message, /• EP 1\.mov\n— EDIT-PC3/);
+    assert.strictEqual(calls[0].auth, 'Bearer tk_secret');
+    cfg = { ...cfg, ntfy: { ...cfg.ntfy, topic: 'bad topic!' } };
+    calls.length = 0;
+    assert.strictEqual(await n.notify('queueDone', 'x'), 0);
+    assert.strictEqual(calls.length, 0);
+  } finally {
+    global.fetch = realFetch;
+  }
+});
