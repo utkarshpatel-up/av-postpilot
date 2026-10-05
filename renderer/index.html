@@ -426,20 +426,21 @@
     <!-- ================================================= Notifications -->
     <section class="page" id="page-notify">
       <h1>Notifications</h1>
-      <p class="lead">Messages go to every chat listed below: people and groups. Every message ends with this PC's name.</p>
+      <p class="lead">Send event alerts to your phone through ntfy and to your email inbox. Enabled services receive the same event messages, including this PC's name.</p>
 
       <div class="card">
         <label class="switch-row">
-          <span><strong>ntfy (phone push)</strong><br><span class="muted small">Receive office alerts without linking a WhatsApp number. Install the <b>ntfy</b> app (Android or iPhone) and subscribe to the topic below; everyone subscribed gets the alert. Your server or plan may have delivery limits.</span></span>
+          <span><strong>ntfy (phone push)</strong><br><span class="muted small">Receive office alerts without linking a WhatsApp number. Add personal and group topics below, then subscribe to the appropriate topics in the <b>ntfy</b> phone app. Your server or plan may have delivery limits.</span></span>
           <input type="checkbox" class="switch" id="nt-ntfy-on">
         </label>
+        <div class="chips" id="nt-ntfy-topics"></div>
         <div class="row">
-          <label for="nt-ntfy-topic">Topic</label>
+          <label for="nt-ntfy-topic">Add topic</label>
           <input type="text" id="nt-ntfy-topic" class="grow" placeholder="e.g. av-studio-render-x7k2p9">
-          <button class="btn" id="nt-ntfy-gen">Make a private name</button>
-          <button class="btn" id="nt-ntfy-copy">Copy</button>
+          <button class="btn" id="nt-ntfy-add">+ Add</button>
+          <button class="btn" id="nt-ntfy-gen">Generate random topic</button>
         </div>
-        <p class="muted small">The topic name works like a password: anyone who knows it can read the alerts, so keep the random part. Use the <b>same topic on every editing PC</b> so the team gets all PCs' alerts in one place.</p>
+        <p class="muted small">Every saved topic receives the same selected alerts. Click a topic to copy its name; ✕ removes it. Use the same group topic on every editing PC, plus a personal topic where needed. Subscribing to both receives two copies. For an unprotected topic, anyone who knows its name can read the alerts.</p>
         <details class="more">
           <summary class="muted small">Own ntfy server or access token (optional)</summary>
           <div class="row">
@@ -453,6 +454,32 @@
             <span class="pill" id="nt-ntfy-has"></span>
           </div>
         </details>
+        <div class="row"><button class="btn" id="nt-ntfy-test">Test ntfy only</button></div>
+      </div>
+
+      <div class="card">
+        <label class="switch-row">
+          <span><strong>Email (Gmail sender)</strong><br><span class="muted small">Send from Gmail to your Gmail, office address, or several recipients. The receiving office account needs no setup.</span></span>
+          <input type="checkbox" class="switch" id="nt-email-on">
+        </label>
+        <div class="row">
+          <label for="nt-email-user">Gmail address</label>
+          <input type="email" id="nt-email-user" class="grow" placeholder="yourname@gmail.com">
+        </div>
+        <div class="row">
+          <label for="nt-email-password">App Password</label>
+          <input type="password" id="nt-email-password" class="grow" autocomplete="new-password" placeholder="Google App Password (not your Gmail password)">
+          <button class="btn" id="nt-email-save">Save password</button>
+          <button class="btn" id="nt-email-clear">Remove password</button>
+          <span class="pill" id="nt-email-has"></span>
+        </div>
+        <p class="muted small">In your Google Account, enable <b>2-Step Verification</b>, then create an <b>App Password</b> named AV PostPilot. Enter it here. If App Passwords is unavailable for your account, this Gmail setup cannot be used. Changing your Google password revokes App Passwords.</p>
+        <div class="row">
+          <label for="nt-email-recipients">Send alerts to</label>
+          <input type="text" id="nt-email-recipients" class="grow" placeholder="you@gmail.com, you@office.com">
+        </div>
+        <p class="muted small">Separate addresses with commas. Each recipient receives a separate email. The first event line is the subject; the full message is the body. Delivery depends on your network and Gmail limits.</p>
+        <div class="row"><button class="btn" id="nt-email-test">Test email only</button></div>
       </div>
 
       <div class="card">
@@ -494,8 +521,8 @@
       <div class="card">
         <div class="card-label">Send a message when…</div>
         <div class="events" id="nt-events"></div>
-        <div class="row"><button class="btn primary" id="nt-test">Send test message</button></div>
-        <p class="muted small">Tokens are stored encrypted for this Windows user only.</p>
+        <div class="row"><button class="btn primary" id="nt-test">Test all enabled services</button></div>
+        <p class="muted small">Tokens and the email App Password are stored encrypted for this Windows user only. Configure them separately on each editing PC.</p>
       </div>
     </section>
 

@@ -26,7 +26,7 @@ contextBridge.exposeInMainWorld('pilot', {
   hasSecrets: () => ipcRenderer.invoke('has-secrets'),
   setSecret: (kind, value) => ipcRenderer.invoke('set-secret', { kind, value }),
   findChats: (kind) => ipcRenderer.invoke('find-chats', kind),
-  sendTest: () => ipcRenderer.invoke('send-test'),
+  sendTest: (only) => ipcRenderer.invoke('send-test', only),
   sceneAdd: (names) => ipcRenderer.invoke('scene-add', names),
   sceneRemove: (i) => ipcRenderer.invoke('scene-remove', i),
   sceneClear: () => ipcRenderer.invoke('scene-clear'),

@@ -15,7 +15,7 @@ PCs need nothing extra installed: no Python.
 | **Episodes** | Creates episode series with a Text+ title; renames a series later (the `(…)` cue never changes) |
 | **Renders** | Copies each finished render, optional HD review pass (one temporary timeline, individual clips, cleaned up afterwards), shutdown with countdown |
 | **New Project** · **Episodes** · **Encoder** | Project folders / bins / Master-Edit timelines; episode series with plain or colour-bar titles; Media-Encoder-style queue with Resolve presets |
-| **Notifications** | ntfy phone push (works on the office network), Telegram bot, WhatsApp (Whapi.Cloud) |
+| **Notifications** | ntfy phone push, Gmail email to personal/office recipients, Telegram and legacy WhatsApp (Whapi.Cloud) |
 
 Footage is never deleted.
 
@@ -42,7 +42,33 @@ You can create a shortcut to `AV PostPilot.exe` yourself. Close PostPilot (inclu
 its tray process) before switching versions. Office application-control policies may
 still require IT to allow the executable, even though no installation is needed.
 
+## Gmail email alerts
+1. In Google Account security, enable **2-Step Verification**, then create an
+   **App Password** named AV PostPilot. See https://support.google.com/accounts/answer/185833.
+   If your account does not offer App Passwords, this setup cannot be used.
+2. On **Notifications → Email**, enter the Gmail sender address and save that App
+   Password (not your usual Gmail password). It is encrypted for the Windows user.
+3. Enter recipient addresses separated by commas: your Gmail address, office address,
+   and/or other team addresses. Recipients need no mail-server setup. Switch Email on.
+4. Enable ntfy with a matching phone subscription. Use **Test email only** and
+   **Test ntfy only** to check each channel, then select the event checkboxes you want.
+   Both enabled services receive the same selected events. Email recipients each
+   get a separate message, with the first event line as subject and full text as body.
+
+Email uses Gmail SMTP with TLS on port 465. The office network must allow that
+connection. Server acceptance does not guarantee inbox delivery: check spam too.
+Gmail sending limits apply. Password changes revoke Google App Passwords; replace
+the saved password when needed. Configure credentials separately on each PC.
+**Remove password** deletes the email credential and disables email alerts.
+
 ## Phone notifications without linking WhatsApp
+Add personal and group topics with **+ Add**, or **Generate random topic**.
+Click a saved topic to copy its name; **✕** removes it. All saved topics receive
+the same selected events. Each person subscribes to the appropriate topics in
+the ntfy phone app. Reuse the team topic on all editing PCs and add personal
+topics on the relevant PCs. Subscribing to both topics produces two notifications
+for an event sent to both. Existing single-topic settings are preserved on upgrade.
+
 For office alerts without linking your primary WhatsApp number, use the existing
 ntfy phone push or Telegram bot integration. For ntfy, subscribe on the phone and
 set the same topic on every editing PC, then use **Send test message**.

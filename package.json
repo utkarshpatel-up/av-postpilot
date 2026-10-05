@@ -1,7 +1,7 @@
 {
   "name": "av-postpilot",
   "productName": "AV PostPilot",
-  "version": "1.8.0",
+  "version": "1.9.1",
   "description": "Edit-bay assistant for DaVinci Resolve: automatic .drp backups, render actions and notifications",
   "main": "electron/main.js",
   "scripts": {
@@ -49,6 +49,7 @@
     }
   },
   "dependencies": {
+    "nodemailer": "^10.0.15",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   }
 }

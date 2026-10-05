@@ -87,7 +87,7 @@ p { margin: 6px 0 10px; line-height: 1.5; }
 .btn:disabled { opacity: .45; cursor: default; }
 .btn.icon { padding: 7px 10px; }
 .link { background: none; border: 0; color: var(--accent-2); cursor: pointer; font: inherit; }
-input[type=text], input[type=password], input[type=number], select {
+input[type=text], input[type=email], input[type=password], input[type=number], select {
   background: #13151a; border: 1px solid var(--line); color: var(--text);
   border-radius: 8px; padding: 7px 10px; font: inherit; user-select: text;
 }

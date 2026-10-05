@@ -7,7 +7,7 @@ const { ResolveBridge } = require('./resolve-bridge');
 const { AutoSaver } = require('./autosave');
 const ps = require('./project-setup');
 const ep = require('./episodes');
-const { Notifier, telegram, whapi } = require('./notify');
+const { Notifier, telegram, whapi, ntfyTopics } = require('./notify');
 const { RenderWatcher, copyVerified } = require('./renders');
 const { collectHdFiles } = require('./hdreview');
 const { SceneQueue } = require('./scenequeue');
@@ -48,7 +48,8 @@ const DEFAULTS = {
   notify: {
     telegram: { enabled: false, chats: [] },
     whapi: { enabled: false, chats: [] },
-    ntfy: { enabled: false, server: 'https://ntfy.sh', topic: '' },
+    ntfy: { enabled: false, server: 'https://ntfy.sh', topics: [] },
+    email: { enabled: false, user: '', recipients: [] },
     events: {
       renderDone: true, renderFailed: true, renderCopied: false, queueDone: true,
       sceneDone: true, sceneQueueDone: true, encoderGroupDone: true, encoderQueueDone: true, shutdown: true, autosaveFailed: true, projectCreated: false,
@@ -86,7 +87,8 @@ function mergeSettings(s) {
     notify: {
       telegram: { ...DEFAULTS.notify.telegram, ...(s.notify?.telegram || {}) },
       whapi: { ...DEFAULTS.notify.whapi, ...(s.notify?.whapi || {}) },
-      ntfy: { ...DEFAULTS.notify.ntfy, ...(s.notify?.ntfy || {}) },
+      ntfy: { ...DEFAULTS.notify.ntfy, ...(s.notify?.ntfy || {}), topics: ntfyTopics(s.notify?.ntfy || {}) },
+      email: { ...DEFAULTS.notify.email, ...(s.notify?.email || {}) },
       events: { ...DEFAULTS.notify.events, ...(s.notify?.events || {}) },
     },
   };
@@ -522,7 +524,7 @@ ipcMain.handle('create-project', async (_e, { name, location, days, footage }) =
 });
 
 // ------------------------------------------------------------------ notifications
-ipcMain.handle('has-secrets', () => ({ telegram: Boolean(getSecret('telegram')), whapi: Boolean(getSecret('whapi')), ntfy: Boolean(getSecret('ntfy')) }));
+ipcMain.handle('has-secrets', () => ({ telegram: Boolean(getSecret('telegram')), whapi: Boolean(getSecret('whapi')), ntfy: Boolean(getSecret('ntfy')), email: Boolean(getSecret('email')) }));
 ipcMain.handle('set-secret', (_e, { kind, value }) => { setSecret(kind, String(value || '').trim()); return true; });
 ipcMain.handle('find-chats', async (_e, kind) => {
   const token = getSecret(kind);
@@ -533,9 +535,13 @@ ipcMain.handle('find-chats', async (_e, kind) => {
     return { ok: false, error: err.message };
   }
 });
-ipcMain.handle('send-test', async () => {
-  const n = await notifier.sendAll(`👋 Test message from AV PostPilot on ${os.hostname()}`);
-  return n ? { ok: true, sent: n } : { ok: false, error: 'Nothing was sent. Check that a service is switched on, has a token and at least one chat, and see Activity for errors.' };
+ipcMain.handle('send-test', async (_e, only) => {
+  if (only && !['ntfy', 'email'].includes(only)) return { ok: false, error: 'Unknown notification service' };
+  const report = await notifier.sendReport(`👋 Test message from AV PostPilot on ${os.hostname()}`, only);
+  return {
+    ...report, ok: report.sent > 0 && report.errors.length === 0,
+    error: report.errors.join('\n') || (report.sent ? '' : 'Nothing was sent. Enable the service and configure its topic or recipients and credentials. See Activity for errors.'),
+  };
 });
 
 // ------------------------------------------------------------------ scene cuts + shutdown

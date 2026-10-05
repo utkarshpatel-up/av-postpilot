@@ -1,5 +1,6 @@
-// Messages to Telegram (bot) and WhatsApp (Whapi.Cloud), personal chats and groups.
+// Event messages to phone push, email and legacy chat integrations.
 // Tokens are passed in by main.js (stored encrypted there), never kept here.
+const { sendEmail, recipients } = require('./email');
 
 async function post(url, body, headers = {}) {
   const res = await fetch(url, {
@@ -62,6 +63,10 @@ const ntfy = {
 
 // Topic names: letters, digits, _ and - only, up to 64 characters.
 const validTopic = (t) => /^[-_A-Za-z0-9]{1,64}$/.test(String(t || ''));
+function ntfyTopics(config = {}) {
+  const list = Array.isArray(config.topics) ? config.topics : [config.topic];
+  return [...new Set(list.map((t) => String(t || '').trim()).filter(validTopic))];
+}
 
 // Phone numbers: keep digits only (country code included, no "+").
 function normaliseWhapiTarget(to) {
@@ -70,8 +75,8 @@ function normaliseWhapiTarget(to) {
 }
 
 class Notifier {
-  constructor({ getSettings, getSecret, log, pc }) {
-    Object.assign(this, { getSettings, getSecret, log, pc });
+  constructor({ getSettings, getSecret, log, pc, emailSend = sendEmail }) {
+    Object.assign(this, { getSettings, getSecret, log, pc, emailSend });
   }
 
   // event: key from settings.notify.events; returns number of messages sent
@@ -82,30 +87,53 @@ class Notifier {
   }
 
   async sendAll(text) {
+    return (await this.sendReport(text)).sent;
+  }
+
+  async sendReport(text, only = null) {
     const n = this.getSettings().notify;
     const jobs = [];
+    const include = (kind) => !only || only === kind;
     const tg = this.getSecret('telegram');
-    if (n.telegram.enabled && tg) {
+    if (include('telegram') && n.telegram.enabled && tg) {
       for (const c of n.telegram.chats) jobs.push(['Telegram', c.name || c.id, () => telegram.send(tg, c.id, text)]);
     }
     const wa = this.getSecret('whapi');
-    if (n.whapi.enabled && wa) {
+    if (include('whapi') && n.whapi.enabled && wa) {
       for (const c of n.whapi.chats) jobs.push(['WhatsApp', c.name || c.id, () => whapi.send(wa, normaliseWhapiTarget(c.id), text)]);
     }
-    if (n.ntfy?.enabled && validTopic(n.ntfy.topic)) {
+    if (include('ntfy') && n.ntfy?.enabled) {
       const lines = text.split('\n');
-      jobs.push(['ntfy', n.ntfy.topic, () => ntfy.send(n.ntfy.server, n.ntfy.topic, this.getSecret('ntfy'), {
+      for (const topic of ntfyTopics(n.ntfy)) jobs.push(['ntfy', topic, () => ntfy.send(n.ntfy.server, topic, this.getSecret('ntfy'), {
         title: lines[0].slice(0, 120),            // first line = notification title
         message: lines.slice(1).join('\n') || lines[0],
         priority: /⚠️|failed|shuts down|⏻/i.test(text) ? 4 : 3,
       })]);
     }
+    if (include('email') && n.email?.enabled) {
+      try {
+        for (const to of recipients(n.email.recipients)) {
+          jobs.push(['Email', to, () => this.emailSend(n.email, this.getSecret('email'), to, text)]);
+        }
+      } catch (err) { jobs.push(['Email', 'recipients', () => Promise.reject(err)]); }
+    }
     let sent = 0;
+    const errors = [];
     await Promise.all(jobs.map(async ([svc, who, fn]) => {
-      try { await fn(); sent++; } catch (err) { this.log('warn', `${svc} message to ${who} failed: ${err.message}`); }
+      try { await fn(); sent++; } catch (err) {
+        // Avoid exposing a credential if a service embeds it in its error.
+        let detail = String(err.message || 'Delivery failed');
+        for (const kind of ['telegram', 'whapi', 'ntfy', 'email']) {
+          const secret = this.getSecret(kind);
+          if (secret && secret.length >= 8) detail = detail.split(secret).join('[redacted]');
+        }
+        const message = `${svc} message to ${who} failed: ${detail}`;
+        errors.push(message);
+        this.log('warn', message);
+      }
     }));
-    return sent;
+    return { sent, attempted: jobs.length, errors };
   }
 }
 
-module.exports = { Notifier, telegram, whapi, ntfy, validTopic, normaliseWhapiTarget };
+module.exports = { Notifier, telegram, whapi, ntfy, validTopic, ntfyTopics, normaliseWhapiTarget };

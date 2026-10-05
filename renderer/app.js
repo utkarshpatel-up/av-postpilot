@@ -813,7 +813,12 @@ async function renderNotify() {
   $('nt-tg-on').checked = n.telegram.enabled;
   $('nt-wa-on').checked = n.whapi.enabled;
   $('nt-ntfy-on').checked = n.ntfy.enabled;
-  if (document.activeElement !== $('nt-ntfy-topic')) $('nt-ntfy-topic').value = n.ntfy.topic || '';
+  $('nt-email-on').checked = n.email.enabled;
+  if (document.activeElement !== $('nt-email-user')) $('nt-email-user').value = n.email.user || '';
+  if (document.activeElement !== $('nt-email-recipients')) $('nt-email-recipients').value = (n.email.recipients || []).join(', ');
+  $('nt-email-has').className = `pill ${has.email ? 'ok' : 'bad'}`;
+  $('nt-email-has').textContent = has.email ? 'Password saved' : 'No password';
+  renderNtfyTopics();
   if (document.activeElement !== $('nt-ntfy-server')) $('nt-ntfy-server').value = n.ntfy.server || 'https://ntfy.sh';
   for (const [k, id] of [['telegram', 'nt-tg-has'], ['whapi', 'nt-wa-has'], ['ntfy', 'nt-ntfy-has']]) {
     $(id).className = `pill ${has[k] ? 'ok' : 'bad'}`;
@@ -868,30 +873,48 @@ for (const [kind, pre] of [['telegram', 'nt-tg'], ['whapi', 'nt-wa']]) {
 }
 // ---- ntfy
 const NTFY_TOPIC = /^[-_A-Za-z0-9]{1,64}$/;
+function ntfyTopicList() { return settings.notify.ntfy.topics || []; }
+function renderNtfyTopics() {
+  $('nt-ntfy-topics').innerHTML = ntfyTopicList().map((topic) =>
+    `<span class="chip"><button class="link" data-copy-topic="${esc(topic)}" title="Copy topic name">${esc(topic)}</button> <button class="chip-x" data-del-topic="${esc(topic)}" title="Remove topic">✕</button></span>`).join('') || '<div class="empty small">No topics yet. Add a personal or group topic below.</div>';
+}
+async function addNtfyTopic(value) {
+  const topic = (typeof value === 'string' ? value : $('nt-ntfy-topic').value).trim();
+  if (!NTFY_TOPIC.test(topic)) return toast('Topic: letters, numbers, - and _ only (up to 64)', true);
+  if (ntfyTopicList().includes(topic)) return toast('That topic is already in the list', true);
+  await save((s) => { s.notify.ntfy.topics = [...ntfyTopicList(), topic]; delete s.notify.ntfy.topic; });
+  $('nt-ntfy-topic').value = '';
+  renderNtfyTopics();
+}
+$('nt-ntfy-add').addEventListener('click', addNtfyTopic);
+$('nt-ntfy-topic').addEventListener('keydown', (e) => { if (e.key === 'Enter') addNtfyTopic(); });
+$('nt-ntfy-topics').addEventListener('click', async (e) => {
+  const button = e.target.closest('button');
+  if (!button) return;
+  if (button.dataset.copyTopic) {
+    await navigator.clipboard.writeText(button.dataset.copyTopic);
+    toast('Topic copied');
+  } else if (button.dataset.delTopic) {
+    await save((s) => {
+      s.notify.ntfy.topics = ntfyTopicList().filter((t) => t !== button.dataset.delTopic);
+      delete s.notify.ntfy.topic;
+      if (!s.notify.ntfy.topics.length) s.notify.ntfy.enabled = false;
+    });
+    await renderNotify();
+  }
+});
 $('nt-ntfy-on').addEventListener('change', (e) => {
-  if (e.target.checked && !NTFY_TOPIC.test(settings.notify.ntfy.topic || '')) {
+  if (e.target.checked && !ntfyTopicList().length) {
     e.target.checked = false;
-    return toast('Set a topic first (click "Make a private name")', true);
+    return toast('Add at least one topic first', true);
   }
   save((s) => { s.notify.ntfy.enabled = e.target.checked; });
 });
-$('nt-ntfy-topic').addEventListener('change', (e) => {
-  const t = e.target.value.trim();
-  if (t && !NTFY_TOPIC.test(t)) return toast('Topic: letters, numbers, - and _ only (up to 64)', true);
-  save((s) => { s.notify.ntfy.topic = t; if (!t) s.notify.ntfy.enabled = false; });
-});
-$('nt-ntfy-gen').addEventListener('click', () => {
+$('nt-ntfy-gen').addEventListener('click', async () => {
   const rnd = [...crypto.getRandomValues(new Uint8Array(6))].map((b) => 'abcdefghjkmnpqrstuvwxyz23456789'[b % 31]).join('');
   const t = `av-studio-${rnd}`;
-  $('nt-ntfy-topic').value = t;
-  save((s) => { s.notify.ntfy.topic = t; });
+  await addNtfyTopic(t);
   toast(`Topic "${t}" saved. Subscribe to it in the ntfy app.`);
-});
-$('nt-ntfy-copy').addEventListener('click', async () => {
-  const t = $('nt-ntfy-topic').value.trim();
-  if (!t) return toast('No topic yet', true);
-  await navigator.clipboard.writeText(t);
-  toast('Topic copied');
 });
 $('nt-ntfy-server').addEventListener('change', (e) => save((s) => { s.notify.ntfy.server = e.target.value.trim() || 'https://ntfy.sh'; }));
 $('nt-ntfy-save').addEventListener('click', async () => {
@@ -900,6 +923,64 @@ $('nt-ntfy-save').addEventListener('click', async () => {
   toast('Token saved (encrypted)');
   renderNotify();
 });
+
+// ---- Gmail email (credentials go only through the encrypted secret store)
+const EMAIL_ADDRESS = /^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/;
+function emailForm() {
+  const user = $('nt-email-user').value.trim();
+  const recipients = [...new Set($('nt-email-recipients').value.split(/[,;\n]+/).map((s) => s.trim().toLowerCase()).filter(Boolean))];
+  if (!EMAIL_ADDRESS.test(user)) throw new Error('Enter your Gmail sender address');
+  if (!recipients.length || recipients.some((r) => !EMAIL_ADDRESS.test(r))) throw new Error('Enter recipient email addresses separated by commas');
+  return { user, recipients };
+}
+async function saveEmailForm() {
+  const fields = emailForm();
+  await save((s) => Object.assign(s.notify.email, fields));
+}
+for (const id of ['nt-email-user', 'nt-email-recipients']) {
+  $(id).addEventListener('change', () => save((s) => {
+    s.notify.email.user = $('nt-email-user').value.trim();
+    s.notify.email.recipients = $('nt-email-recipients').value.split(/[,;\n]+/).map((v) => v.trim()).filter(Boolean);
+  }));
+}
+$('nt-email-on').addEventListener('change', async (e) => {
+  const enabled = e.target.checked;
+  try {
+    if (enabled) {
+      await saveEmailForm();
+      if (!(await pilot.hasSecrets()).email) throw new Error('Save a Google App Password first');
+    }
+    await save((s) => { s.notify.email.enabled = enabled; });
+  } catch (err) { e.target.checked = false; toast(err.message, true); }
+});
+$('nt-email-save').addEventListener('click', async () => {
+  const password = $('nt-email-password').value.replace(/\s/g, '');
+  if (!/^[A-Za-z]{16}$/.test(password)) return toast('Enter the 16-letter Google App Password, not your Gmail password', true);
+  try {
+    await pilot.setSecret('email', password);
+    $('nt-email-password').value = '';
+    toast('App Password saved (encrypted)');
+    await renderNotify();
+  } catch (err) { toast(err.message, true); }
+});
+$('nt-email-clear').addEventListener('click', async () => {
+  await pilot.setSecret('email', '');
+  await save((s) => { s.notify.email.enabled = false; });
+  $('nt-email-password').value = '';
+  await renderNotify();
+  toast('Email password removed; email alerts switched off');
+});
+async function testNotifications(button, only) {
+  button.disabled = true;
+  try {
+    if (only === 'email' || (!only && settings.notify.email.enabled)) await saveEmailForm();
+    const r = await pilot.sendTest(only);
+    toast(r.ok ? `Test accepted by ${r.sent} destination(s). Check your phone or inbox.` : `${r.sent ? `${r.sent} destination(s) accepted the test. ` : ''}${r.error}`, !r.ok);
+  } catch (err) { toast(err.message, true); }
+  finally { button.disabled = false; }
+}
+$('nt-ntfy-test').addEventListener('click', (e) => testNotifications(e.currentTarget, 'ntfy'));
+$('nt-email-test').addEventListener('click', (e) => testNotifications(e.currentTarget, 'email'));
 
 $('nt-wa-add').addEventListener('click', async () => {
   const id = $('nt-wa-phone').value.replace(/[^\d@.a-z]/gi, '');
@@ -913,12 +994,7 @@ $('nt-events').addEventListener('change', (e) => {
   const k = e.target.dataset.ev;
   if (k) save((s) => { s.notify.events[k] = e.target.checked; });
 });
-$('nt-test').addEventListener('click', async () => {
-  $('nt-test').disabled = true;
-  const r = await pilot.sendTest();
-  $('nt-test').disabled = false;
-  toast(r.ok ? `Test sent to ${r.sent} chat(s)` : r.error, !r.ok);
-});
+$('nt-test').addEventListener('click', (e) => testNotifications(e.currentTarget));
 
 // ------------------------------------------------------------------ encoder
 let enc = { groups: [], running: false, stopping: false };
