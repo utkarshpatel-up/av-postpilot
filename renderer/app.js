@@ -47,6 +47,7 @@ function go(page) {
   if (page === 'autosave') refreshDestChecks();
   if (page === 'newproject') renderNewProject();
   if (page === 'notify') renderNotify();
+  if (page === 'librarybackup') { renderLibraryForm(); refreshLibraryStatus(); }
   if (page === 'renders') renderRendersForm();
   if (page === 'encoder' && !presets.length && status.connected && status.project) loadPresets(true);
   if (page === 'scene' && status.connected && status.project) loadSceneTimelines();
@@ -805,6 +806,9 @@ const EVENTS = [
   ['shutdown', 'The PC is about to shut down'],
   ['autosaveFailed', 'Auto-save has a problem (e.g. NAS offline)'],
   ['projectCreated', 'A new project is created'],
+  ['libraryBackupDone', 'Library database backup finishes successfully'],
+  ['libraryBackupFailed', 'Library database backup fails or has copy errors'],
+  ['libraryAlert', 'A library disappears or its project count drops'],
 ];
 
 async function renderNotify() {
@@ -1214,8 +1218,69 @@ $('enc-clear').addEventListener('click', () => encCall('clearFinished'));
 $('enc-after').addEventListener('change', (e) => save((s) => { s.encoder.afterQueue = e.target.value; }));
 
 // ------------------------------------------------------------------ start
+const LIBRARY_FIELDS = ['mode', 'root', 'staleHours', 'pgBin', 'host', 'port', 'user', 'copyRoot', 'times', 'keepDays', 'keepMin'];
+async function renderLibraryForm() {
+  const s = settings.libraryBackup;
+  for (const key of LIBRARY_FIELDS) if (document.activeElement !== $(`lb-${key}`)) $(`lb-${key}`).value = s[key] ?? '';
+  $('lb-server-form').classList.toggle('hidden', s.mode !== 'server');
+  const has = (await pilot.hasSecrets()).postgres;
+  $('lb-password-has').className = `pill ${has ? 'ok' : 'bad'}`;
+  $('lb-password-has').textContent = has ? 'Password saved' : 'No password';
+}
+async function saveLibraryForm() {
+  const fields = {};
+  for (const key of LIBRARY_FIELDS) fields[key] = ['port', 'keepDays', 'keepMin', 'staleHours'].includes(key) ? Number($(`lb-${key}`).value) : $(`lb-${key}`).value.trim();
+  await save((s) => { s.libraryBackup = fields; });
+}
+let libraryBusy = false;
+async function refreshLibraryStatus() {
+  const r = await pilot.libraryBackup('status');
+  $('lb-status').textContent = !r.ok ? r.error : r.locked || r.running ? 'Backup running, or a backup lock needs attention.' : !r.libraries.length ? 'No completed library dumps found.' : r.libraries.some(l => l.stale) ? 'Attention: one or more backups are stale.' : 'Latest dump files are within the age limit.';
+  $('lb-libraries').innerHTML = (r.libraries || []).map(l => `<tr><td>${esc(l.name)}</td><td>${esc(l.count ?? 'Unavailable')}</td><td>${esc(new Date(l.time).toLocaleString())}</td><td>${(l.bytes / 1048576).toFixed(1)} MB</td><td>${l.stale ? 'Stale' : 'Recent file'}</td></tr>`).join('') || '<tr><td colspan="5" class="muted">No dumps to display</td></tr>';
+  const state = r.state;
+  $('lb-protected').textContent = `${(r.protectedFiles || []).length} protected snapshot(s).${state?.lastSuccess ? ` Last fully successful run: ${new Date(state.lastSuccess).toLocaleString()}.` : ''}${state?.errors?.length ? ` Latest run errors: ${state.errors.join('; ')}` : ''}${state?.warnings?.length ? ` Alerts: ${state.warnings.join('; ')}` : ''}`;
+  $('lb-log').textContent = r.log || 'No shared log available.';
+  $('lb-run').disabled = libraryBusy || r.running || r.locked;
+}
+for (const key of LIBRARY_FIELDS) $(`lb-${key}`).addEventListener('change', async () => { await saveLibraryForm(); await renderLibraryForm(); await refreshLibraryStatus(); });
+document.querySelectorAll('[data-lb-browse]').forEach(button => button.addEventListener('click', async () => {
+  const key = button.dataset.lbBrowse;
+  const dir = await pilot.pickFolder($(`lb-${key}`).value);
+  if (dir) { $(`lb-${key}`).value = dir; await saveLibraryForm(); await refreshLibraryStatus(); }
+}));
+$('lb-password-save').addEventListener('click', async () => {
+  const value = $('lb-password').value;
+  if (!value) return toast('Enter the PostgreSQL password', true);
+  await pilot.setSecret('postgres', value);
+  $('lb-password').value = '';
+  await renderLibraryForm(); toast('PostgreSQL password saved (encrypted)');
+});
+async function libraryAction(action, button) {
+  button.disabled = true;
+  if (action === 'run') libraryBusy = true;
+  try {
+    await saveLibraryForm();
+    const r = await pilot.libraryBackup(action, { unattended: $('lb-unattended').checked });
+    if (r.canceled) return;
+    const message = !r.ok ? r.error || r.errors?.join('; ') || 'Backup finished with errors' : action === 'check' ? `${r.libraries.length} Resolve libraries: ${r.libraries.map(l => `${l.name} (${l.count} projects)`).join(', ')}` : r.file ? `Setup exported: ${r.file}. Run it on the server.` : 'Database backup completed';
+    $('lb-result').textContent = message;
+    toast(message, !r.ok);
+  } catch (err) { toast(err.message, true); }
+  finally { libraryBusy = false; button.disabled = false; await refreshLibraryStatus(); }
+}
+for (const [id, action] of [['lb-check', 'check'], ['lb-run', 'run'], ['lb-schedule', 'schedule'], ['lb-mac-export', 'mac-export']]) $(id).addEventListener('click', e => libraryAction(action, e.currentTarget));
+$('lb-refresh').addEventListener('click', refreshLibraryStatus);
+pilot.onLibraryBackup(() => { if ($('page-librarybackup').classList.contains('active')) refreshLibraryStatus(); });
+setInterval(() => { if (settings && $('page-librarybackup').classList.contains('active')) refreshLibraryStatus(); }, 30000);
+
 (async () => {
   const init = await pilot.getInitial();
+  if (init.platform === 'darwin') {
+    $('lb-pgBin').placeholder = '/Library/PostgreSQL/13/bin';
+    $('lb-unattended').disabled = true;
+    $('lb-schedule').textContent = 'Export Mac schedule setup';
+    $('lb-schedule-help').textContent = 'Run bash install.sh in the exported schedule folder as this Mac user. The app can be closed, but the user must remain logged in with the login keychain unlocked. Keep the app and settings at the same paths. Use mounted NAS folders and re-export after changing times. Disable the old Mac backup schedule before replacing it with this engine.';
+  }
   ({ settings, status, autosave } = init);
   pcName = init.pc;
   logEntries = init.log;

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, shell, nativeImage, safeStorage, Notification } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, shell, nativeImage, safeStorage, Notification, net } = require('electron');
 const { execFile, spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
@@ -7,26 +7,36 @@ const { ResolveBridge } = require('./resolve-bridge');
 const { AutoSaver } = require('./autosave');
 const ps = require('./project-setup');
 const ep = require('./episodes');
-const { Notifier, telegram, whapi, ntfyTopics } = require('./notify');
+const { Notifier, telegram, whapi, ntfyTopics, setHttpFetch } = require('./notify');
+setHttpFetch((url, options) => net.fetch(url, options));
 const { RenderWatcher, copyVerified } = require('./renders');
 const { collectHdFiles } = require('./hdreview');
 const { SceneQueue } = require('./scenequeue');
 const { Encoder } = require('./encoder');
 const seriesList = require('./series-list');
+const libraryBackup = require('./library-backup');
 
 // Developer checks can run beside a normal copy with their own settings folder.
 if (process.env.AVPP_USERDATA) app.setPath('userData', process.env.AVPP_USERDATA);
+if (process.argv.includes('--library-backup-run')) {
+  const dataArg = process.argv.find(a => a.startsWith('--backup-user-data='));
+  if (dataArg) app.setPath('userData', dataArg.slice('--backup-user-data='.length));
+  require('./library-backup-headless')({ app, safeStorage, net });
+  return; // Scheduled backups run separately without opening Resolve or the UI.
+}
 if (!app.requestSingleInstanceLock()) { app.quit(); return; }
 
 const DATA = app.getPath('userData');
 const SETTINGS_FILE = path.join(DATA, 'settings.json');
 const STATE_FILE = path.join(DATA, 'state.json');
 const LOG_FILE = path.join(DATA, 'postpilot.log');
-const RESOLVE_PREFS = path.join(process.env.APPDATA || '', 'Blackmagic Design', 'DaVinci Resolve', 'Preferences', 'config.dat');
+const RESOLVE_PREFS = process.platform === 'darwin'
+  ? path.join(os.homedir(), 'Library', 'Preferences', 'Blackmagic Design', 'DaVinci Resolve', 'config.dat')
+  : path.join(process.env.APPDATA || '', 'Blackmagic Design', 'DaVinci Resolve', 'Preferences', 'config.dat');
 
 const DEFAULTS = {
-  resolvePath: 'C:\\Program Files\\Blackmagic Design\\DaVinci Resolve\\Resolve.exe',
-  launchResolve: true,
+  resolvePath: process.platform === 'darwin' ? '/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/MacOS/Resolve' : 'C:\\Program Files\\Blackmagic Design\\DaVinci Resolve\\Resolve.exe',
+  launchResolve: process.platform !== 'darwin',
   startHidden: false,
   autosave: {
     enabled: true,
@@ -45,6 +55,7 @@ const DEFAULTS = {
   scene: { afterQueue: 'nothing', shutdownSeconds: 60 },
   manual: { shutdownSeconds: 60 },
   encoder: { afterQueue: 'nothing', shutdownSeconds: 60 },
+  libraryBackup: libraryBackup.DEFAULTS,
   notify: {
     telegram: { enabled: false, chats: [] },
     whapi: { enabled: false, chats: [] },
@@ -53,6 +64,7 @@ const DEFAULTS = {
     events: {
       renderDone: true, renderFailed: true, renderCopied: false, queueDone: true,
       sceneDone: true, sceneQueueDone: true, encoderGroupDone: true, encoderQueueDone: true, shutdown: true, autosaveFailed: true, projectCreated: false,
+      libraryBackupDone: false, libraryBackupFailed: true, libraryAlert: true,
     },
   },
 };
@@ -80,6 +92,7 @@ function mergeSettings(s) {
     project: { ...DEFAULTS.project, ...(s.project?.move === false ? { footage: 'copy' } : {}), ...(s.project || {}) },
     series: { ...DEFAULTS.series, ...(s.series || {}) },
     encoder: { ...DEFAULTS.encoder, ...(s.encoder || {}) },
+    libraryBackup: { ...DEFAULTS.libraryBackup, ...(s.libraryBackup || {}) },
     manual: { ...DEFAULTS.manual, ...(s.shutdownSeconds ? { shutdownSeconds: s.shutdownSeconds } : {}), ...(s.manual || {}) },
     renders: { ...DEFAULTS.renders, ...(s.shutdownSeconds ? { shutdownSeconds: s.shutdownSeconds } : {}), ...(s.renders || {}), hd: { ...DEFAULTS.renders.hd, ...(s.renders?.hd || {}) } },
     // older versions had one shared countdown
@@ -116,7 +129,7 @@ fs.mkdirSync(DATA, { recursive: true });
 fs.writeFileSync(bridgeLua, fs.readFileSync(path.join(__dirname, 'bridge.lua')));
 
 const bridge = new ResolveBridge({
-  getFuscriptPath: () => path.join(path.dirname(settings.resolvePath), 'fuscript.exe'),
+  getFuscriptPath: () => process.platform === 'darwin' ? '/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fuscript' : path.join(path.dirname(settings.resolvePath), 'fuscript.exe'),
   luaFile: bridgeLua,
   log,
 });
@@ -246,6 +259,7 @@ let shutdownTimer = null;
 const countdown = (v) => Math.min(24 * 3600, Math.max(10, Number(v) || 60));
 const mmss = (s) => (s >= 60 ? `${Math.floor(s / 60)} min${s % 60 ? ` ${s % 60} s` : ''}` : `${s} s`);
 function scheduleShutdown(reason, seconds = countdown(settings.renders.shutdownSeconds)) {
+  if (process.platform !== 'win32') { log('warn', 'Automatic shutdown is currently supported on Windows only'); return; }
   if (shutdownAt) return;
   shutdownAt = Date.now() + seconds * 1000;
   shutdownReason = reason;
@@ -420,8 +434,54 @@ function applySettings(next) {
 }
 
 // ------------------------------------------------------------------ IPC
+const databaseBackup = new libraryBackup.LibraryBackup({
+  getSettings: () => settings.libraryBackup, getPassword: () => getSecret('postgres'),
+  notify: (...args) => notifier.notify(...args), log,
+  onChange: () => send('library-backup', { running: databaseBackup.running }),
+});
+ipcMain.handle('library-backup', async (_e, action, options = {}) => {
+  try {
+    if (action === 'status') return { ...libraryBackup.monitor(settings.libraryBackup), running: databaseBackup.running };
+    if (action === 'check') return { ok: true, libraries: await databaseBackup.check() };
+    if (action === 'run') return await databaseBackup.run();
+    if (action === 'mac-export') {
+      const picked = await dialog.showOpenDialog(win, { title: 'Choose where to export Mac backup setup', properties: ['openDirectory', 'createDirectory'] });
+      if (picked.canceled) return { ok: false, canceled: true };
+      const dest = path.join(picked.filePaths[0], 'PostPilot-Mac-Backup-Setup');
+      if (fs.existsSync(dest)) throw new Error('PostPilot-Mac-Backup-Setup already exists in this folder; choose another location');
+      fs.mkdirSync(dest);
+      for (const name of ['install.sh', 'resolve_db_backup.sh', 'resolve_db_restore.sh', 'HOW_TO_RESTORE.txt']) {
+        const source = fs.readFileSync(path.join(__dirname, '..', 'resolve-db-backup', name), 'utf8').replace(/\r/g, '');
+        fs.writeFileSync(path.join(dest, name), source, 'utf8');
+      }
+      return { ok: true, file: dest };
+    }
+    if (action === 'schedule') {
+      if (process.platform === 'darwin' && app.isPackaged) {
+        libraryBackup.validate(settings.libraryBackup);
+        const picked = await dialog.showOpenDialog(win, { title: 'Choose where to export Mac backup schedule', properties: ['openDirectory', 'createDirectory'] });
+        if (picked.canceled) return { ok: false, canceled: true };
+        const dest = path.join(picked.filePaths[0], 'PostPilot-Mac-Library-Schedule');
+        if (fs.existsSync(dest)) throw new Error('Schedule export folder already exists; choose another location');
+        const source = libraryBackup.macSchedule(settings.libraryBackup, process.execPath, DATA);
+        fs.mkdirSync(dest);
+        fs.writeFileSync(path.join(dest, `${source.label}.plist`), source.plist);
+        fs.writeFileSync(path.join(dest, 'install.sh'), source.installer, { mode: 0o700 });
+        return { ok: true, file: dest };
+      }
+      if (process.platform !== 'win32' || !app.isPackaged) throw new Error('Export the Windows schedule from the packaged app on the server');
+      libraryBackup.validate(settings.libraryBackup);
+      const source = libraryBackup.windowsSchedule(settings.libraryBackup, process.execPath, DATA, Boolean(options.unattended));
+      const picked = await dialog.showSaveDialog(win, { title: 'Save Windows backup schedule setup', defaultPath: 'PostPilot-Backup-Schedule.ps1', filters: [{ name: 'PowerShell', extensions: ['ps1'] }] });
+      if (picked.canceled) return { ok: false, canceled: true };
+      fs.writeFileSync(picked.filePath, source, 'utf8');
+      return { ok: true, file: picked.filePath };
+    }
+    throw new Error('Unknown library backup action');
+  } catch (err) { return { ok: false, error: err.message }; }
+});
 ipcMain.handle('get-initial', () => ({
-  settings, status, autosave: autosaver.summary(), log: logLines,
+  settings, status, autosave: autosaver.summary(), log: logLines, platform: process.platform,
   scene: sceneQueue.summary(), encoder: encoder.summary(), renders: renders.summary(), shutdownAt, shutdownReason,
   pc: os.hostname(), version: app.getVersion(),
 }));
@@ -524,8 +584,8 @@ ipcMain.handle('create-project', async (_e, { name, location, days, footage }) =
 });
 
 // ------------------------------------------------------------------ notifications
-ipcMain.handle('has-secrets', () => ({ telegram: Boolean(getSecret('telegram')), whapi: Boolean(getSecret('whapi')), ntfy: Boolean(getSecret('ntfy')), email: Boolean(getSecret('email')) }));
-ipcMain.handle('set-secret', (_e, { kind, value }) => { setSecret(kind, String(value || '').trim()); return true; });
+ipcMain.handle('has-secrets', () => ({ telegram: Boolean(getSecret('telegram')), whapi: Boolean(getSecret('whapi')), ntfy: Boolean(getSecret('ntfy')), email: Boolean(getSecret('email')), postgres: Boolean(getSecret('postgres')) }));
+ipcMain.handle('set-secret', (_e, { kind, value }) => { setSecret(kind, kind === 'postgres' ? String(value || '') : String(value || '').trim()); return true; });
 ipcMain.handle('find-chats', async (_e, kind) => {
   const token = getSecret(kind);
   if (!token) return { ok: false, error: 'Save the token first' };
@@ -680,7 +740,10 @@ app.on('second-instance', () => {
   showWindow();
   if (settings.launchResolve) launchResolve();
 });
-app.on('before-quit', () => { quitting = true; bridge.stop(); });
+app.on('before-quit', e => {
+  if (databaseBackup.running) { e.preventDefault(); log('warn', 'Wait for the library backup to finish before quitting'); showWindow(); return; }
+  quitting = true; bridge.stop();
+});
 app.on('window-all-closed', (e) => e.preventDefault());
 
 app.whenReady().then(async () => {

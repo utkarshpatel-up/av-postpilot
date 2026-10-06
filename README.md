@@ -11,6 +11,7 @@ PCs need nothing extra installed: no Python.
 | **Dashboard** | Resolve connection, open project/library, auto-save status, shutdown countdown, render queue |
 | **New Project** | Creates the project folders, moves (same drive) or copies the satsang day folders into `Satsang Files`, builds the Resolve project with bins, nested footage and `Master-` / `Edit-` timelines |
 | **Auto-save** | Exports the open project as `.drp` every N minutes to several locations, only when it changed |
+| **Library Backup** | Monitors existing Mac/NAS database dumps; backs up whole PostgreSQL libraries, roles and optional secondary copies on the server |
 | **Scene Cuts** | Queue of timelines for *Detect Scene Cuts*, run one after another |
 | **Episodes** | Creates episode series with a Text+ title; renames a series later (the `(…)` cue never changes) |
 | **Renders** | Copies each finished render, optional HD review pass (one temporary timeline, individual clips, cleaned up afterwards), shutdown with countdown |
@@ -62,6 +63,11 @@ the saved password when needed. Configure credentials separately on each PC.
 **Remove password** deletes the email credential and disables email alerts.
 
 ## Phone notifications without linking WhatsApp
+HTTP notifications use Electron's browser networking to support office system
+proxy settings. A website opening does not prove notification publishing is allowed.
+If a test fails, Activity includes the available network/certificate error details.
+Certificate checks remain enabled; proxy login or firewall restrictions may require IT.
+
 Add personal and group topics with **+ Add**, or **Generate random topic**.
 Click a saved topic to copy its name; **✕** removes it. All saved topics receive
 the same selected events. Each person subscribes to the appropriate topics in
@@ -94,3 +100,68 @@ templates for proactive alerts; it is not implemented in this version.
 
 ## Also in this repo
 `resolve-db-backup/`: backup and restore scripts for the Mac PostgreSQL project server (launchd, project-count alarm, restore into a separate `restore_…` library). See `resolve-db-backup/HOW_TO_RESTORE.txt`.
+
+## Library backup setup (1.10.0)
+
+On the existing Mac server, start with **Library Backup → Monitor existing Mac/server
+backups**, and select `~/ResolveBackup` (use Browse to select the actual home folder).
+The page refreshes every 30 seconds while open, showing each library's latest dump,
+saved project count, size, stale status, protected snapshots and the available log.
+On editing PCs, select the shared Mac folder or the NAS `Project Database Backup`
+folder. NAS-only copies may have no counts/log. This checks files and timestamps;
+it does not query PostgreSQL or prove that a dump restores successfully.
+
+If the Mac schedule already works, leave it running. **Export existing Mac setup
+scripts** exports the original installer, backup/restore scripts and restore guide
+with Mac line endings. To set up a new Mac, review `PG_BIN`, `NAS_DIR` and the
+installer's `TIMES`, then run `bash install.sh` in the exported folder on that Mac.
+The installer prompts for the database password and installs a user launchd agent;
+that Mac user must remain logged in. It also replaces matching old cron lines after
+saving the crontab. This original script owns its Mac notifications; selecting its
+folder in PostPilot does not add ntfy/email alerts to that script.
+
+For a future Windows server, choose **Run PostgreSQL backups here**, select the
+installed PostgreSQL `bin` folder (client tools must match the server version or be
+compatible), local backup folder, database host/user/port and optional existing NAS
+folder. Save the database password, **Test connection & list libraries**, then
+**Back up now**. The engine also runs manually on Mac with its PostgreSQL bin path.
+It creates a dedicated `AV-PostPilot-Libraries` folder and never modifies the database.
+On Mac, **Export Mac schedule setup** exports a user launchd agent for the new engine;
+run `bash install.sh` in that exported folder. Keep the configuring Mac user logged in
+with the login keychain unlocked. Disable the original backup schedule before replacing
+it. The new engine uses the app's ntfy/email settings; the original script remains a
+separate option for monitoring an already-working setup.
+It uses custom-format `pg_dump`, checks the archive listing, backs up roles/users,
+and copies to the secondary destination. Failed secondary copies are reported while
+local backups continue. Credentials are encrypted for the configuring OS account.
+
+An observed project-count drop or a previously tracked library disappearing preserves
+the previous dump under `PROTECTED/<library>` and triggers a notification. This cannot
+detect a deletion followed by an addition that leaves the count unchanged. Retention
+only prunes this engine's timestamped files older than the configured days, keeping
+at least the specified minimum. Protected dumps are never automatically pruned.
+Use a separate root per PostgreSQL server. Database names must use letters, numbers,
+hyphens or underscores. Footage is not backed up. Test restores separately before
+relying on backups; the app does not restore or overwrite live libraries.
+
+On Windows, **Export Windows schedule setup** produces a PowerShell Task Scheduler
+installer. Run it as the same Windows account that saved PostPilot settings and
+credentials. Default tasks require that user to stay logged in. The logged-out option
+prompts for that Windows account's password; local policy may require IT assistance.
+PostPilot need not remain open. Keep its extracted folder at the same path, use UNC
+NAS paths, and re-export after changing times or moving the app. An existing backup
+lock blocks concurrent runs; after an interrupted run remove it only when no backup
+process is active. Failure and deletion alerts use enabled notification channels;
+successful-backup alerts are optional on Notifications.
+
+### macOS distribution
+
+Run `npm ci` then `npm run dist:mac` **on a Mac**, or run the repository's
+**Build macOS distributions** GitHub Actions workflow. It produces separate Intel
+(`x64`) and Apple Silicon (`arm64`) ZIPs containing `AV PostPilot.app`, including the
+Mac backup scripts. Extract and open the matching app; no PostgreSQL tools are bundled.
+Mac starts with automatic Resolve launch disabled, suitable for the library server.
+The build uses an ad-hoc signature, not Apple Developer ID signing/notarization;
+macOS may require approval in Privacy & Security. Windows cannot build this macOS
+target with electron-builder. The existing editing workflows remain Windows-tested;
+Mac Resolve integration and real PostgreSQL backups need validation on the Mac server.

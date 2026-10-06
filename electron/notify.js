@@ -1,9 +1,22 @@
 // Event messages to phone push, email and legacy chat integrations.
 // Tokens are passed in by main.js (stored encrypted there), never kept here.
 const { sendEmail, recipients } = require('./email');
+// Electron supplies Chromium networking so office system proxies are respected.
+// Standalone tests retain Node fetch without importing Electron.
+let httpFetch = (...args) => fetch(...args);
+function setHttpFetch(fn) { httpFetch = fn; }
+function deliveryError(err) {
+  const parts = [];
+  for (let current = err, depth = 0; current && depth < 4; current = current.cause, depth++) {
+    for (const value of [current.message, current.code]) {
+      if (value && !parts.includes(String(value))) parts.push(String(value));
+    }
+  }
+  return parts.join(' / ') || 'Delivery failed';
+}
 
 async function post(url, body, headers = {}) {
-  const res = await fetch(url, {
+  const res = await httpFetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json', accept: 'application/json', ...headers },
     body: JSON.stringify(body),
@@ -20,7 +33,7 @@ async function post(url, body, headers = {}) {
 }
 
 async function get(url, headers = {}) {
-  const res = await fetch(url, { headers: { accept: 'application/json', ...headers }, signal: AbortSignal.timeout(20000) });
+  const res = await httpFetch(url, { headers: { accept: 'application/json', ...headers }, signal: AbortSignal.timeout(20000) });
   const json = await res.json().catch(() => null);
   if (!res.ok || !json || json.ok === false) {
     throw new Error(`${res.status} ${(json && (json.description || json.error?.message || json.message)) || res.statusText}`);
@@ -122,7 +135,7 @@ class Notifier {
     await Promise.all(jobs.map(async ([svc, who, fn]) => {
       try { await fn(); sent++; } catch (err) {
         // Avoid exposing a credential if a service embeds it in its error.
-        let detail = String(err.message || 'Delivery failed');
+        let detail = deliveryError(err);
         for (const kind of ['telegram', 'whapi', 'ntfy', 'email']) {
           const secret = this.getSecret(kind);
           if (secret && secret.length >= 8) detail = detail.split(secret).join('[redacted]');
@@ -136,4 +149,4 @@ class Notifier {
   }
 }
 
-module.exports = { Notifier, telegram, whapi, ntfy, validTopic, ntfyTopics, normaliseWhapiTarget };
+module.exports = { Notifier, telegram, whapi, ntfy, validTopic, ntfyTopics, normaliseWhapiTarget, setHttpFetch, deliveryError };

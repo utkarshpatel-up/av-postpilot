@@ -37,7 +37,7 @@ class ResolveBridge {
 
   start() {
     const exe = this.getFuscriptPath();
-    if (!fs.existsSync(exe)) throw new Error(`fuscript.exe not found at ${exe}`);
+    if (!fs.existsSync(exe)) throw new Error(`Resolve scripting runner not found at ${exe}`);
     const proc = spawn(exe, ['-l', 'lua', this.luaFile], {
       windowsHide: true,
       cwd: path.dirname(this.luaFile),

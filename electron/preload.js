@@ -4,6 +4,8 @@ const on = (channel) => (fn) => ipcRenderer.on(channel, (_e, payload) => fn(payl
 
 contextBridge.exposeInMainWorld('pilot', {
   getInitial: () => ipcRenderer.invoke('get-initial'),
+  libraryBackup: (action, options) => ipcRenderer.invoke('library-backup', action, options),
+  onLibraryBackup: on('library-backup'),
   saveSettings: (s) => ipcRenderer.invoke('save-settings', s),
   saveNow: () => ipcRenderer.invoke('save-now'),
   launchResolve: () => ipcRenderer.invoke('launch-resolve'),
