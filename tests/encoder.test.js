@@ -115,8 +115,8 @@ test('nothing starts without a preset and output folder', async () => {
 test('output names never overwrite an existing file', () => {
   const out = tmp();
   touch(path.join(out, 'DD Hindi-1700_V2_HD.mp4'));
-  assert.strictEqual(outputName(out, 'X:\\a\\DD Hindi-1700_V2.mov', '_HD'), 'DD Hindi-1700_V2_HD (2)');
-  assert.strictEqual(outputName(out, 'X:\\a\\DD Hindi-1701_V2.mov', '_HD'), 'DD Hindi-1701_V2_HD');
+  assert.strictEqual(outputName(out, path.join(out, 'DD Hindi-1700_V2.mov'), '_HD'), 'DD Hindi-1700_V2_HD (2)');
+  assert.strictEqual(outputName(out, path.join(out, 'DD Hindi-1701_V2.mov'), '_HD'), 'DD Hindi-1701_V2_HD');
 });
 
 test('folders add their video files (subfolders too), other files are skipped', () => {

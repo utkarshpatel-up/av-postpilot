@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'electron/**'
+      - 'tests/**'
       - 'renderer/**'
       - 'resolve-db-backup/**'
       - 'scripts/verify-mac-package.js'
