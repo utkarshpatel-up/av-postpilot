@@ -22,8 +22,6 @@
         <svg viewBox="0 0 24 24"><path d="M10 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8zm6 10h-3v3h-2v-3H8v-2h3V9h2v3h3z"/></svg>New Project</button>
       <button class="nav" data-page="autosave">
         <svg viewBox="0 0 24 24"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm3-10H5V5h10z"/></svg>Auto-save</button>
-      <button class="nav" data-page="librarybackup">
-        <svg viewBox="0 0 24 24"><path d="M12 2C6.5 2 2 4.2 2 7v10c0 2.8 4.5 5 10 5s10-2.2 10-5V7c0-2.8-4.5-5-10-5zm0 2c4.8 0 8 1.8 8 3s-3.2 3-8 3-8-1.8-8-3 3.2-3 8-3zm0 16c-4.8 0-8-1.8-8-3v-2c1.8 1.2 4.7 2 8 2s6.2-.8 8-2v2c0 1.2-3.2 3-8 3z"/></svg>Library Backup</button>
       <button class="nav" data-page="scene">
         <svg viewBox="0 0 24 24"><path d="M9.6 7.6A4 4 0 1 0 6 10a4 4 0 0 0 1.6-.4L10 12l-2.4 2.4A4 4 0 1 0 9.6 16.4L12 14l7 7h3v-1zM6 8a2 2 0 1 1 0-4 2 2 0 0 1 0 4zm0 12a2 2 0 1 1 0-4 2 2 0 0 1 0 4zM19 3l-6 6 2 2 7-7V3z"/></svg>Scene Cuts<span class="soon hidden" id="nav-scene-badge"></span></button>
       <button class="nav" data-page="episodes">
@@ -38,6 +36,8 @@
         <svg viewBox="0 0 24 24"><path d="M3 5h18v2H3zm0 6h18v2H3zm0 6h12v2H3z"/></svg>Activity</button>
       <button class="nav" data-page="settings">
         <svg viewBox="0 0 24 24"><path d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.6 7.6 0 0 0-1.7-1L15 3h-4l-.4 2.7a7.6 7.6 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.5 7.5 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.6 7.6 0 0 0 1.7 1L11 21h4l.4-2.7a7.6 7.6 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>Settings</button>
+      <button class="nav" data-page="librarybackup">
+        <svg viewBox="0 0 24 24"><path d="M12 2C6.5 2 2 4.2 2 7v10c0 2.8 4.5 5 10 5s10-2.2 10-5V7c0-2.8-4.5-5-10-5zm0 2c4.8 0 8 1.8 8 3s-3.2 3-8 3-8-1.8-8-3 3.2-3 8-3zm0 16c-4.8 0-8-1.8-8-3v-2c1.8 1.2 4.7 2 8 2s6.2-.8 8-2v2c0 1.2-3.2 3-8 3z"/></svg>Library Backup</button>
     </nav>
     <div class="sidebar-foot" id="app-version"></div>
   </aside>
@@ -534,12 +534,10 @@
       <p class="lead">Protect whole PostgreSQL project libraries. Run the backup engine on the server; editing PCs can monitor the shared backup folder. Footage is not included.</p>
       <div class="card">
         <div class="card-label">Setup</div>
-        <div class="row"><label for="lb-mode">This computer</label><select id="lb-mode"><option value="monitor">Monitor existing Mac/server backups</option><option value="server">Run PostgreSQL backups here</option></select></div>
-        <div class="row"><label for="lb-root">Backup folder</label><input type="text" id="lb-root" class="grow" placeholder="Local folder on the server, or a shared Mac/NAS backup folder"><button class="btn" data-lb-browse="root">Browse…</button></div>
-        <div class="row"><label for="lb-staleHours">Warn if older than</label><input type="number" id="lb-staleHours" min="1" max="720"><span class="muted small">hours; stale status is displayed below</span></div>
-        <p class="muted small">For the existing Mac script, select the shared ResolveBackup folder or the NAS Project Database Backup folder. The NAS shows dump timestamps; project counts and logs require the Mac's state/log files to be shared too. Monitoring is read-only and refreshes while this page is open.</p>
-        <div class="row"><button class="btn" id="lb-mac-export">Export existing Mac setup scripts</button></div>
-        <p class="muted small">Exporting does not change the Mac server. Its installer uses launchd and asks for PostgreSQL credentials on the Mac. Keep the existing schedule unless you intend to replace it.</p>
+        <div class="row"><label for="lb-mode">This computer</label><select id="lb-mode"><option value="monitor">Monitor shared backups</option><option value="server">Run PostgreSQL backups here</option></select></div>
+        <div id="lb-monitor-folder-slot"><div class="row backup-folder-field" id="lb-root-row"><label for="lb-root" id="lb-root-label">Backup folder</label><div class="backup-folder-controls grow"><input type="text" id="lb-root" class="grow" placeholder="Local folder on the server, or a shared Mac/NAS backup folder"><button class="btn" data-lb-browse="root">Browse…</button></div></div></div>
+        <div id="lb-monitor-age-slot"><div class="row" id="lb-age-row"><label for="lb-staleHours" id="lb-age-label">Mark stale if older than</label><input type="number" id="lb-staleHours" min="1" max="720"><span class="muted small" id="lb-age-hint">hours; stale status is displayed below</span></div></div>
+        <p class="muted small">On the database server, choose Run PostgreSQL backups here and a local backup folder. Other computers can monitor the shared PostPilot backup folder. Monitoring is read-only and refreshes while this page is open.</p>
       </div>
       <div class="card hidden" id="lb-server-form">
         <div class="card-label">PostgreSQL server setup</div>
@@ -547,12 +545,17 @@
         <div class="row"><label for="lb-host">Database host</label><input type="text" id="lb-host" class="grow"><label for="lb-port">Port</label><input type="number" id="lb-port" min="1" max="65535"></div>
         <div class="row"><label for="lb-user">Database user</label><input type="text" id="lb-user" class="grow"></div>
         <div class="row"><label for="lb-password">PostgreSQL password</label><input type="password" id="lb-password" class="grow" autocomplete="new-password" placeholder="Stored encrypted for this computer account"><button class="btn" id="lb-password-save">Save password</button><span class="pill" id="lb-password-has"></span></div>
-        <div class="row"><label for="lb-copyRoot">Secondary/NAS folder</label><input type="text" id="lb-copyRoot" class="grow" placeholder="Optional existing UNC share or local backup folder"><button class="btn" data-lb-browse="copyRoot">Browse…</button></div>
-        <div class="row"><label for="lb-times">Daily backup times</label><input type="text" id="lb-times" class="grow" placeholder="11:00,14:00,17:00,20:00,23:00"></div>
+        <div class="backup-folder-pair"><div id="lb-server-folder-slot"></div><div class="row backup-folder-field"><label for="lb-copyRoot">Secondary/NAS folder (optional)</label><div class="backup-folder-controls"><input type="text" id="lb-copyRoot" class="grow" placeholder="Existing NAS or secondary folder"><button class="btn" data-lb-browse="copyRoot">Browse…</button></div></div></div>
+        <input type="hidden" id="lb-times">
+        <div class="row"><label>Daily backup times</label><div class="chips grow" id="lb-time-chips" aria-label="Saved daily backup times"></div></div>
+        <div class="row"><label id="lb-time-editor-label">Add a time</label><select id="lb-time-hour" aria-label="Hour"></select><span>:</span><select id="lb-time-minute" aria-label="Minute"></select><select id="lb-time-period" aria-label="AM or PM"><option>AM</option><option>PM</option></select><button class="btn" id="lb-time-add">+ Add time</button><button class="btn hidden" id="lb-time-cancel">Cancel edit</button></div>
+        <p class="muted small">Click a time chip to edit it; × removes it. Times use the server's local clock. After changing times, export and run the schedule setup again.</p>
         <div class="row"><label for="lb-keepDays">Keep for</label><input type="number" id="lb-keepDays" min="1"><span class="muted">days; always keep at least</span><input type="number" id="lb-keepMin" min="1" aria-label="Minimum backups to retain"><span class="muted">backups per library</span></div>
+        <div id="lb-server-age-slot"></div>
+        <p class="muted small">The age limit marks old dumps as Stale. Enable Library backup is overdue in Notifications for phone/email alerts. Checks run every 5 minutes while PostPilot is open; exported schedules also include an hourly health check. Re-export and install schedule setup to check when the app is closed. One alert per overdue library until a fresh backup is seen.</p>
         <p class="muted small">New backups are placed in AV-PostPilot-Libraries inside the chosen folders. Retention only removes this engine's timestamped files; PROTECTED snapshots are never pruned. Archive-list checks do not replace a restore test.</p>
         <div class="row"><button class="btn" id="lb-check">Test connection &amp; list libraries</button><button class="btn primary" id="lb-run">Back up now</button></div>
-        <div class="row"><label class="check inline"><input type="checkbox" id="lb-unattended"> Run even when this Windows user is logged out</label></div>
+        <div class="row" id="lb-unattended-row"><label class="check inline"><input type="checkbox" id="lb-unattended"> Run even when this Windows user is logged out</label></div>
         <div class="row"><button class="btn" id="lb-schedule">Export Windows schedule setup</button></div>
         <p class="muted small" id="lb-schedule-help">Run the exported PowerShell setup script on the server. PostPilot can be closed when the task runs. Logged-out scheduling prompts for the same Windows account's password and may require IT permissions. Otherwise that user must stay logged in (locking the screen is fine). Use a UNC path for NAS access. Keep the app folder at the same path and re-export after changing times or moving the app.</p>
       </div>
@@ -562,7 +565,7 @@
         <p id="lb-result" class="muted small"></p>
         <table class="jobs"><thead><tr><th>Library</th><th>Projects</th><th>Latest dump</th><th>Size</th><th>Health</th></tr></thead><tbody id="lb-libraries"></tbody></table>
         <p id="lb-protected" class="muted small"></p>
-        <p class="muted small">Backup failure and missing/deleted-project alerts use your enabled ntfy/email services. Enable successful-backup alerts on Notifications if wanted. Mac-script monitoring displays files only; the original Mac script still owns its alerts.</p>
+        <p class="muted small">Backup failure and missing/deleted-project alerts use the server's enabled ntfy/email services. Enable successful-backup alerts on Notifications if wanted. Shared-folder monitoring displays backup health; it does not send additional alerts.</p>
       </div>
       <div class="card"><div class="card-label">Server backup log</div><pre id="lb-log" class="backup-log">No shared log available.</pre></div>
     </section>

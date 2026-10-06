@@ -244,10 +244,21 @@ DEST="$HOME/Library/LaunchAgents/${label}.plist"
 cp "$HERE/${label}.plist" "$DEST"
 chmod 600 "$DEST"
 launchctl bootout "gui/$(id -u)/${label}" 2>/dev/null || true
-launchctl bootstrap "gui/$(id -u)" "$DEST"
 launchctl enable "gui/$(id -u)/${label}"
+launchctl bootstrap "gui/$(id -u)" "$DEST"
 echo 'PostPilot library backup schedule installed. Keep this Mac user logged in and the app at the same path.'
 `;
-  return { label, plist, installer };
+  const healthLabel = `${label}.health`;
+  const healthPlist = plist.replace(`<string>${label}</string>`, `<string>${healthLabel}</string>`)
+    .replace('--library-backup-run', '--library-backup-check')
+    .replace(/<key>StartCalendarInterval<\/key><array>.*?<\/array>/, '<key>StartInterval</key><integer>3600</integer><key>RunAtLoad</key><true/>')
+    .replace(/library-task-/g, 'library-health-');
+  const healthInstall = installer.replaceAll(label, healthLabel).replace(/echo 'PostPilot[^\n]*\n/, '');
+  return { label, plist, healthLabel, healthPlist, installer: `${installer}\n${healthInstall}` };
 }
-module.exports = { DEFAULTS, LibraryBackup, monitor, validate, times, prune, windowsSchedule, macSchedule, ownedRoot };
+function windowsHealthSchedule(exe, data, unattended = false) {
+  const q = value => `'${String(value).replace(/'/g, "''")}'`;
+  const name = `AVPostPilot-LibraryHealth-${crypto.createHash('sha256').update(data).digest('hex').slice(0, 8)}`;
+  return `\n# Independent hourly overdue-backup check; shares notification settings.\n$healthAction = New-ScheduledTaskAction -Execute ${q(exe)} -Argument ${q(`--library-backup-check --backup-user-data="${data}"`)}\n$healthTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1)\nRegister-ScheduledTask -TaskName ${q(name)} -Action $healthAction -Trigger $healthTrigger -Settings $settings ${unattended ? '-User $credential.UserName -Password $credential.GetNetworkCredential().Password' : '-Principal $principal'} -Force\nWrite-Host 'Hourly library health check installed.'\n`;
+}
+module.exports = { DEFAULTS, LibraryBackup, monitor, validate, times, prune, windowsSchedule, windowsHealthSchedule, macSchedule, ownedRoot };

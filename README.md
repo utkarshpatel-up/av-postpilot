@@ -101,26 +101,25 @@ templates for proactive alerts; it is not implemented in this version.
 ## Also in this repo
 `resolve-db-backup/`: backup and restore scripts for the Mac PostgreSQL project server (launchd, project-count alarm, restore into a separate `restore_…` library). See `resolve-db-backup/HOW_TO_RESTORE.txt`.
 
-## Library backup setup (1.10.0)
+## Library backup setup (2.0.0)
 
-On the existing Mac server, start with **Library Backup → Monitor existing Mac/server
-backups**, and select `~/ResolveBackup` (use Browse to select the actual home folder).
+On editing computers, select **Library Backup → Monitor shared backups** and choose
+the shared backup folder from the server running PostPilot.
 The page refreshes every 30 seconds while open, showing each library's latest dump,
 saved project count, size, stale status, protected snapshots and the available log.
 On editing PCs, select the shared Mac folder or the NAS `Project Database Backup`
 folder. NAS-only copies may have no counts/log. This checks files and timestamps;
 it does not query PostgreSQL or prove that a dump restores successfully.
 
-If the Mac schedule already works, leave it running. **Export existing Mac setup
-scripts** exports the original installer, backup/restore scripts and restore guide
-with Mac line endings. To set up a new Mac, review `PG_BIN`, `NAS_DIR` and the
-installer's `TIMES`, then run `bash install.sh` in the exported folder on that Mac.
-The installer prompts for the database password and installs a user launchd agent;
-that Mac user must remain logged in. It also replaces matching old cron lines after
-saving the crontab. This original script owns its Mac notifications; selecting its
-folder in PostPilot does not add ntfy/email alerts to that script.
+For migration from the original Mac script, run `bash stop-old-mac-backup.sh` on
+the server as the Mac account that ran its installer, without sudo. This stops and
+disables only `com.resolve.db-backup`, archiving its LaunchAgent plist under
+`~/ResolveBackup/disabled-schedules`. If a backup is active, it asks you to rerun
+after completion. Existing dumps, database, scripts and PostPilot jobs are preserved.
+It does not edit cron or another account's jobs. The legacy installer is no longer
+exported or packaged by the app.
 
-For a future Windows server, choose **Run PostgreSQL backups here**, select the
+On the Mac or Windows database server, choose **Run PostgreSQL backups here**, select the
 installed PostgreSQL `bin` folder (client tools must match the server version or be
 compatible), local backup folder, database host/user/port and optional existing NAS
 folder. Save the database password, **Test connection & list libraries**, then
@@ -129,8 +128,7 @@ It creates a dedicated `AV-PostPilot-Libraries` folder and never modifies the da
 On Mac, **Export Mac schedule setup** exports a user launchd agent for the new engine;
 run `bash install.sh` in that exported folder. Keep the configuring Mac user logged in
 with the login keychain unlocked. Disable the original backup schedule before replacing
-it. The new engine uses the app's ntfy/email settings; the original script remains a
-separate option for monitoring an already-working setup.
+it. The new engine uses the app's ntfy/email settings.
 It uses custom-format `pg_dump`, checks the archive listing, backs up roles/users,
 and copies to the secondary destination. Failed secondary copies are reported while
 local backups continue. Credentials are encrypted for the configuring OS account.
@@ -144,6 +142,12 @@ Use a separate root per PostgreSQL server. Database names must use letters, numb
 hyphens or underscores. Footage is not backed up. Test restores separately before
 relying on backups; the app does not restore or overwrite live libraries.
 
+Daily backup times appear as editable AM/PM chips. Click a chip to edit it, choose
+hour/minute/AM or PM, and save; **+ Add time** adds another trigger and **×** removes
+one. At least one time is required and duplicates are rejected. Existing 24-hour
+settings are preserved. Export and run schedule setup again after changing times;
+the scheduler uses the server's local clock.
+
 On Windows, **Export Windows schedule setup** produces a PowerShell Task Scheduler
 installer. Run it as the same Windows account that saved PostPilot settings and
 credentials. Default tasks require that user to stay logged in. The logged-out option
@@ -154,12 +158,24 @@ lock blocks concurrent runs; after an interrupted run remove it only when no bac
 process is active. Failure and deletion alerts use enabled notification channels;
 successful-backup alerts are optional on Notifications.
 
+**Library backup is overdue** on Notifications enables age-based phone/email alerts
+on the computer set to server mode. Its threshold is **Notify me if older than** in
+Library Backup. The server checks every five minutes while the app runs. Schedule
+exports include a separate hourly health task so missed backup jobs can be detected
+with the app closed. Re-export and install the schedule to add this task. Server
+power/network and the scheduling account's credentials must be available; a powered-off
+server cannot send an alert. Mac user launchd requires the account to remain logged in.
+Editing computers in monitor mode do not send these alerts. Each library alerts once
+per overdue incident; a fresh observed backup resets it. Failed delivery is retried.
+If no dump exists, the threshold starts from the first enabled health check. An hourly
+check can report up to about an hour after the age threshold passes.
+
 ### macOS distribution
 
 Run `npm ci` then `npm run dist:mac` **on a Mac**, or run the repository's
 **Build macOS distributions** GitHub Actions workflow. It produces separate Intel
 (`x64`) and Apple Silicon (`arm64`) ZIPs containing `AV PostPilot.app`, including the
-Mac backup scripts. Extract and open the matching app; no PostgreSQL tools are bundled.
+PostPilot backup engine. Extract and open the matching app; no PostgreSQL tools are bundled.
 Mac starts with automatic Resolve launch disabled, suitable for the library server.
 The build uses an ad-hoc signature, not Apple Developer ID signing/notarization;
 macOS may require approval in Privacy & Security. Windows cannot build this macOS

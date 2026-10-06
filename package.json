@@ -1,7 +1,7 @@
 {
   "name": "av-postpilot",
   "productName": "AV PostPilot",
-  "version": "1.10.0",
+  "version": "2.0.0",
   "description": "Edit-bay assistant for DaVinci Resolve: automatic .drp backups, render actions and notifications",
   "main": "electron/main.js",
   "scripts": {
@@ -25,7 +25,6 @@
     "files": [
       "electron/**/*",
       "renderer/**/*",
-      "resolve-db-backup/**/*",
       "package.json"
     ],
     "win": {

@@ -15,10 +15,11 @@ const { SceneQueue } = require('./scenequeue');
 const { Encoder } = require('./encoder');
 const seriesList = require('./series-list');
 const libraryBackup = require('./library-backup');
+const { checkOverdue } = require('./library-overdue');
 
 // Developer checks can run beside a normal copy with their own settings folder.
 if (process.env.AVPP_USERDATA) app.setPath('userData', process.env.AVPP_USERDATA);
-if (process.argv.includes('--library-backup-run')) {
+if (process.argv.includes('--library-backup-run') || process.argv.includes('--library-backup-check')) {
   const dataArg = process.argv.find(a => a.startsWith('--backup-user-data='));
   if (dataArg) app.setPath('userData', dataArg.slice('--backup-user-data='.length));
   require('./library-backup-headless')({ app, safeStorage, net });
@@ -64,7 +65,7 @@ const DEFAULTS = {
     events: {
       renderDone: true, renderFailed: true, renderCopied: false, queueDone: true,
       sceneDone: true, sceneQueueDone: true, encoderGroupDone: true, encoderQueueDone: true, shutdown: true, autosaveFailed: true, projectCreated: false,
-      libraryBackupDone: false, libraryBackupFailed: true, libraryAlert: true,
+      libraryBackupDone: false, libraryBackupFailed: true, libraryAlert: true, libraryBackupOverdue: true,
     },
   },
 };
@@ -444,18 +445,6 @@ ipcMain.handle('library-backup', async (_e, action, options = {}) => {
     if (action === 'status') return { ...libraryBackup.monitor(settings.libraryBackup), running: databaseBackup.running };
     if (action === 'check') return { ok: true, libraries: await databaseBackup.check() };
     if (action === 'run') return await databaseBackup.run();
-    if (action === 'mac-export') {
-      const picked = await dialog.showOpenDialog(win, { title: 'Choose where to export Mac backup setup', properties: ['openDirectory', 'createDirectory'] });
-      if (picked.canceled) return { ok: false, canceled: true };
-      const dest = path.join(picked.filePaths[0], 'PostPilot-Mac-Backup-Setup');
-      if (fs.existsSync(dest)) throw new Error('PostPilot-Mac-Backup-Setup already exists in this folder; choose another location');
-      fs.mkdirSync(dest);
-      for (const name of ['install.sh', 'resolve_db_backup.sh', 'resolve_db_restore.sh', 'HOW_TO_RESTORE.txt']) {
-        const source = fs.readFileSync(path.join(__dirname, '..', 'resolve-db-backup', name), 'utf8').replace(/\r/g, '');
-        fs.writeFileSync(path.join(dest, name), source, 'utf8');
-      }
-      return { ok: true, file: dest };
-    }
     if (action === 'schedule') {
       if (process.platform === 'darwin' && app.isPackaged) {
         libraryBackup.validate(settings.libraryBackup);
@@ -466,12 +455,13 @@ ipcMain.handle('library-backup', async (_e, action, options = {}) => {
         const source = libraryBackup.macSchedule(settings.libraryBackup, process.execPath, DATA);
         fs.mkdirSync(dest);
         fs.writeFileSync(path.join(dest, `${source.label}.plist`), source.plist);
+        fs.writeFileSync(path.join(dest, `${source.healthLabel}.plist`), source.healthPlist);
         fs.writeFileSync(path.join(dest, 'install.sh'), source.installer, { mode: 0o700 });
         return { ok: true, file: dest };
       }
       if (process.platform !== 'win32' || !app.isPackaged) throw new Error('Export the Windows schedule from the packaged app on the server');
       libraryBackup.validate(settings.libraryBackup);
-      const source = libraryBackup.windowsSchedule(settings.libraryBackup, process.execPath, DATA, Boolean(options.unattended));
+      const source = libraryBackup.windowsSchedule(settings.libraryBackup, process.execPath, DATA, Boolean(options.unattended)) + libraryBackup.windowsHealthSchedule(process.execPath, DATA, Boolean(options.unattended));
       const picked = await dialog.showSaveDialog(win, { title: 'Save Windows backup schedule setup', defaultPath: 'PostPilot-Backup-Schedule.ps1', filters: [{ name: 'PowerShell', extensions: ['ps1'] }] });
       if (picked.canceled) return { ok: false, canceled: true };
       fs.writeFileSync(picked.filePath, source, 'utf8');
@@ -754,6 +744,9 @@ app.whenReady().then(async () => {
   log('info', `AV PostPilot ${app.getVersion()} started on ${os.hostname()}`);
   if (settings.launchResolve) await launchResolve();
   autosaver.schedule();
+  const checkLibraryAge = () => checkOverdue({ settings, stateFile: path.join(DATA, 'library-overdue.json'), notify: (...args) => notifier.notify(...args) }).catch(err => log('warn', `Backup health check: ${err.message}`));
+  checkLibraryAge();
+  setInterval(checkLibraryAge, 5 * 60 * 1000);
   await poll();
   setInterval(poll, 3000);
 

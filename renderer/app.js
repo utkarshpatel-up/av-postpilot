@@ -809,6 +809,7 @@ const EVENTS = [
   ['libraryBackupDone', 'Library database backup finishes successfully'],
   ['libraryBackupFailed', 'Library database backup fails or has copy errors'],
   ['libraryAlert', 'A library disappears or its project count drops'],
+  ['libraryBackupOverdue', 'Library backup is overdue (age limit in Library Backup)'],
 ];
 
 async function renderNotify() {
@@ -1219,10 +1220,66 @@ $('enc-after').addEventListener('change', (e) => save((s) => { s.encoder.afterQu
 
 // ------------------------------------------------------------------ start
 const LIBRARY_FIELDS = ['mode', 'root', 'staleHours', 'pgBin', 'host', 'port', 'user', 'copyRoot', 'times', 'keepDays', 'keepMin'];
+let libraryTimeEditing = null;
+const libraryTimeList = () => [...new Set($('lb-times').value.split(/[,\s]+/).filter(Boolean))].sort();
+function libraryTimeLabel(time) {
+  const [h, m] = time.split(':').map(Number);
+  return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h >= 12 ? 'PM' : 'AM'}`;
+}
+function renderLibraryTimes() {
+  $('lb-time-chips').innerHTML = libraryTimeList().map(time => `<span class="chip"><button class="link" data-edit-time="${esc(time)}" title="Edit time">${esc(libraryTimeLabel(time))}</button> <button class="chip-x" data-remove-time="${esc(time)}" aria-label="Remove ${esc(libraryTimeLabel(time))}">×</button></span>`).join('');
+}
+function resetLibraryTimeEditor() {
+  libraryTimeEditing = null;
+  $('lb-time-add').textContent = '+ Add time';
+  $('lb-time-editor-label').textContent = 'Add a time';
+  $('lb-time-cancel').classList.add('hidden');
+}
+$('lb-time-hour').innerHTML = Array.from({ length: 12 }, (_, i) => `<option>${i + 1}</option>`).join('');
+$('lb-time-minute').innerHTML = Array.from({ length: 60 }, (_, i) => `<option>${String(i).padStart(2, '0')}</option>`).join('');
+$('lb-time-hour').value = '9';
+$('lb-time-chips').addEventListener('click', async e => {
+  const edit = e.target.closest('[data-edit-time]');
+  const remove = e.target.closest('[data-remove-time]');
+  if (edit) {
+    libraryTimeEditing = edit.dataset.editTime;
+    const [h, m] = libraryTimeEditing.split(':').map(Number);
+    $('lb-time-hour').value = String(h % 12 || 12);
+    $('lb-time-minute').value = String(m).padStart(2, '0');
+    $('lb-time-period').value = h >= 12 ? 'PM' : 'AM';
+    $('lb-time-add').textContent = 'Save time';
+    $('lb-time-editor-label').textContent = 'Edit time';
+    $('lb-time-cancel').classList.remove('hidden');
+  }
+  if (remove) {
+    const list = libraryTimeList();
+    if (list.length <= 1) return toast('Keep at least one daily backup time', true);
+    $('lb-times').value = list.filter(t => t !== remove.dataset.removeTime).join(',');
+    resetLibraryTimeEditor(); renderLibraryTimes(); await saveLibraryForm();
+  }
+});
+$('lb-time-add').addEventListener('click', async () => {
+  const hour = Number($('lb-time-hour').value) % 12 + ($('lb-time-period').value === 'PM' ? 12 : 0);
+  const time = `${String(hour).padStart(2, '0')}:${$('lb-time-minute').value}`;
+  const list = libraryTimeList().filter(t => t !== libraryTimeEditing);
+  if (list.includes(time)) return toast('That backup time is already added', true);
+  $('lb-times').value = [...list, time].sort().join(',');
+  resetLibraryTimeEditor(); renderLibraryTimes(); await saveLibraryForm();
+});
+$('lb-time-cancel').addEventListener('click', resetLibraryTimeEditor);
 async function renderLibraryForm() {
   const s = settings.libraryBackup;
+  const server = s.mode === 'server';
+  $('lb-age-label').textContent = server ? 'Notify me if older than' : 'Mark stale if older than';
+  $('lb-age-hint').textContent = server ? 'hours; enable overdue alerts in Notifications' : 'hours; stale status is displayed below';
+  for (const [row, slot] of [['lb-root-row', server ? 'lb-server-folder-slot' : 'lb-monitor-folder-slot'], ['lb-age-row', server ? 'lb-server-age-slot' : 'lb-monitor-age-slot']]) {
+    if ($(row).parentElement !== $(slot)) $(slot).appendChild($(row));
+  }
+  $('lb-root-label').textContent = server ? 'Local backup folder' : 'Backup folder';
+  $('lb-root').placeholder = server ? 'Existing local folder on the server' : 'Local folder on the server, or a shared Mac/NAS backup folder';
   for (const key of LIBRARY_FIELDS) if (document.activeElement !== $(`lb-${key}`)) $(`lb-${key}`).value = s[key] ?? '';
   $('lb-server-form').classList.toggle('hidden', s.mode !== 'server');
+  renderLibraryTimes();
   const has = (await pilot.hasSecrets()).postgres;
   $('lb-password-has').className = `pill ${has ? 'ok' : 'bad'}`;
   $('lb-password-has').textContent = has ? 'Password saved' : 'No password';
@@ -1268,7 +1325,7 @@ async function libraryAction(action, button) {
   } catch (err) { toast(err.message, true); }
   finally { libraryBusy = false; button.disabled = false; await refreshLibraryStatus(); }
 }
-for (const [id, action] of [['lb-check', 'check'], ['lb-run', 'run'], ['lb-schedule', 'schedule'], ['lb-mac-export', 'mac-export']]) $(id).addEventListener('click', e => libraryAction(action, e.currentTarget));
+for (const [id, action] of [['lb-check', 'check'], ['lb-run', 'run'], ['lb-schedule', 'schedule']]) $(id).addEventListener('click', e => libraryAction(action, e.currentTarget));
 $('lb-refresh').addEventListener('click', refreshLibraryStatus);
 pilot.onLibraryBackup(() => { if ($('page-librarybackup').classList.contains('active')) refreshLibraryStatus(); });
 setInterval(() => { if (settings && $('page-librarybackup').classList.contains('active')) refreshLibraryStatus(); }, 30000);
@@ -1278,6 +1335,7 @@ setInterval(() => { if (settings && $('page-librarybackup').classList.contains('
   if (init.platform === 'darwin') {
     $('lb-pgBin').placeholder = '/Library/PostgreSQL/13/bin';
     $('lb-unattended').disabled = true;
+    $('lb-unattended-row').classList.add('hidden');
     $('lb-schedule').textContent = 'Export Mac schedule setup';
     $('lb-schedule-help').textContent = 'Run bash install.sh in the exported schedule folder as this Mac user. The app can be closed, but the user must remain logged in with the login keychain unlocked. Keep the app and settings at the same paths. Use mounted NAS folders and re-export after changing times. Disable the old Mac backup schedule before replacing it with this engine.';
   }

@@ -11,6 +11,12 @@ const evalFile = path.join(dir, 'check.js');
 fs.writeFileSync(evalFile, `(async () => {
   go('notify');
   await renderNotify();
+  const overdue = document.querySelector('[data-ev="libraryBackupOverdue"]');
+  if (!overdue || !overdue.checked) throw Error('Missing overdue checkbox/default');
+  overdue.checked = false; overdue.dispatchEvent(new Event('change', { bubbles: true })); await new Promise(r => setTimeout(r, 250));
+  if (settings.notify.events.libraryBackupOverdue) throw Error('Overdue off switch did not save');
+  overdue.checked = true; overdue.dispatchEvent(new Event('change', { bubbles: true })); await new Promise(r => setTimeout(r, 250));
+  if (!settings.notify.events.libraryBackupOverdue) throw Error('Overdue on switch did not save');
   const wait = () => new Promise(r => setTimeout(r, 300));
   if (!$('nt-email-test') || !$('nt-ntfy-test')) throw Error('Missing channel test buttons');
   if (ntfyTopicList()[0] !== 'legacy-personal') throw Error('Legacy topic not preserved');
@@ -50,12 +56,12 @@ fs.writeFileSync(evalFile, `(async () => {
   await wait();
   if (settings.notify.email.enabled || (await pilot.hasSecrets()).email) throw Error('Password removal failed');
   $('toast').classList.add('hidden');
-  $('nt-ntfy-topics').scrollIntoView({ block: 'start' });
+  $('nt-events').scrollIntoView({ block: 'start' });
   return JSON.stringify({ ok: true, version: (await pilot.getInitial()).version, recipients: settings.notify.email.recipients, emailDisabled: !settings.notify.email.enabled });
 })()`);
-const child = spawn(path.join(root, 'dist', 'win-unpacked', 'AV PostPilot.exe'), [], {
+const child = spawn(process.env.AVPP_DEV_UI ? path.join(root, 'node_modules', 'electron', 'dist', 'electron.exe') : path.join(root, 'dist', 'win-unpacked', 'AV PostPilot.exe'), process.env.AVPP_DEV_UI ? [root] : [], {
   cwd: root, windowsHide: true,
-  env: { ...process.env, AVPP_USERDATA: dir, AVPP_SCREENSHOT: dir, AVPP_PAGES: 'notify', AVPP_EVAL_FILE: evalFile, AVPP_MAXIMIZE: '1' },
+  env: { ...process.env, AVPP_USERDATA: dir, AVPP_SCREENSHOT: dir, AVPP_PAGES: 'notify', AVPP_EVAL_FILE: evalFile },
   stdio: 'pipe',
 });
 let errors = '';
