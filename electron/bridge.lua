@@ -59,6 +59,7 @@ local function reply(t) io.write(encode(t), '\n'); io.flush() end
 
 ---------------------------------------------------------------- Resolve
 local resolve
+local encoderSession
 
 local function connect()
   if resolve then
@@ -80,13 +81,14 @@ local function status()
   local pm = r:GetProjectManager()
   local p = pm and pm:GetCurrentProject()
   if p then
-    local proj = { name = p:GetName() }
+    local proj = { name = p:GetName(), id = p:GetUniqueId() }
     pcall(function()
       local db = pm:GetCurrentDatabase()
       if db then proj.dbType = db.DbType; proj.dbName = db.DbName end
     end)
     pcall(function() proj.folder = pm:GetCurrentFolder() end)
     res.project = proj
+    res.encoderProject = encoderSession and p:GetUniqueId() == encoderSession.id or false
     pcall(function() res.rendering = p:IsRenderingInProgress() end)
     local jobs = array()
     pcall(function()
@@ -489,7 +491,56 @@ end
 -- rate and size (so nothing is retimed or reframed), rendered with a preset as a
 -- single clip named exactly as asked. Temporary items live in bin a.folder and
 -- are removed afterwards with hdcleanup.
+local function encbegin(a)
+  local r = connect()
+  if not r then return { ok = false, error = 'Resolve is not connected' } end
+  if encoderSession then return { ok = false, error = 'An encoder workspace already exists; finish its cleanup first' } end
+  local pm = r:GetProjectManager()
+  local original = pm:GetCurrentProject()
+  if (original and original:GetUniqueId() or '') ~= (a.originalId or '') then
+    return { ok = false, error = 'The open project changed. Start Encoder again to confirm the current project.' }
+  end
+  if original then
+    if original:IsRenderingInProgress() then return { ok = false, error = 'Wait for the current render to finish' } end
+    if pm:SaveProject() ~= true then return { ok = false, error = 'Resolve could not save your project. Encoding was not started.' } end
+    if pm:CloseProject(original) ~= true then return { ok = false, error = 'Resolve could not close your saved project' } end
+  end
+  local created, p = pcall(function() return pm:CreateProject(a.name) end)
+  if not created or not p then
+    return { ok = false, error = 'Could not create the temporary encoder project' }
+  end
+  encoderSession = { token = a.token, id = p:GetUniqueId(), name = p:GetName(), folder = pm:GetCurrentFolder(), database = pm:GetCurrentDatabase() }
+  return { ok = true }
+end
+
+local function encowned(a)
+  local _, p = project()
+  if not encoderSession or encoderSession.token ~= a.token or not p or p:GetUniqueId() ~= encoderSession.id then
+    return nil, 'Encoder workspace changed or connection was restarted. Queue stopped to protect your project.'
+  end
+  return p
+end
+
+local function encfinish(a)
+  local p, err = encowned(a)
+  if not p then return { ok = false, error = err } end
+  if p:IsRenderingInProgress() then return { ok = false, error = 'Temporary project is still rendering; cleanup postponed' } end
+  local pm = connect():GetProjectManager()
+  local s = encoderSession
+  local db = pm:GetCurrentDatabase() or {}
+  local old = s.database or {}
+  if pm:GetCurrentFolder() ~= s.folder or db.DbName ~= old.DbName or db.DbType ~= old.DbType or db.IpAddress ~= old.IpAddress or p:GetName() ~= s.name then
+    return { ok = false, error = 'Project location or name changed; temporary project retained for safety' }
+  end
+  if pm:CloseProject(p) ~= true then return { ok = false, error = 'Could not close temporary project' } end
+  local removed = pm:DeleteProject(s.name) == true
+  encoderSession = nil
+  return { ok = removed, error = not removed and 'Temporary project could not be deleted' or nil }
+end
+
 local function encstart(a)
+  local owned, err = encowned(a)
+  if not owned then return { ok = false, fatal = true, error = err } end
   local _, p = project()
   if not p then return { ok = false, error = 'No project open in Resolve' } end
   local mp = p:GetMediaPool()
@@ -524,6 +575,10 @@ local function encstart(a)
 end
 
 local function jobstatus(a)
+  if a.token then
+    local owned, err = encowned(a)
+    if not owned then return { ok = false, fatal = true, error = err } end
+  end
   local _, p = project()
   if not p then return { ok = false, error = 'No project open' } end
   local s = p:GetRenderJobStatus(a.id)
@@ -551,6 +606,9 @@ while true do
   local cmd, arg = line:match('^%s*(%w+)\t?(.*)$')
   if cmd then
     local ok, res = pcall(function()
+      if encoderSession and (cmd == 'setup' or cmd == 'series' or cmd == 'rename' or cmd == 'detect' or cmd == 'hdbatch' or cmd == 'hdcleanup' or cmd == 'save' or cmd == 'export') then
+        return { ok = false, error = 'Finish Encoder before modifying or backing up a project' }
+      end
       if cmd == 'status' then return status()
       elseif cmd == 'export' then return export(arg)
       elseif cmd == 'save' then return save()
@@ -564,6 +622,8 @@ while true do
       elseif cmd == 'hdbatch' then return hdbatch(parse(arg))
       elseif cmd == 'hdcleanup' then return hdcleanup(parse(arg))
       elseif cmd == 'encstart' then return encstart(parse(arg))
+      elseif cmd == 'encbegin' then return encbegin(parse(arg))
+      elseif cmd == 'encfinish' then return encfinish(parse(arg))
       elseif cmd == 'jobstatus' then return jobstatus(parse(arg))
       elseif cmd == 'stoprender' then return stoprender()
       else return { ok = false, error = 'unknown command: ' .. cmd } end

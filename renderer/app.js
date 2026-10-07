@@ -49,7 +49,7 @@ function go(page) {
   if (page === 'notify') renderNotify();
   if (page === 'librarybackup') { renderLibraryForm(); refreshLibraryStatus(); }
   if (page === 'renders') renderRendersForm();
-  if (page === 'encoder' && !presets.length && status.connected && status.project) loadPresets(true);
+  if (page === 'encoder' && !presets.length && status.connected) loadPresets(true);
   if (page === 'scene' && status.connected && status.project) loadSceneTimelines();
   if (page === 'episodes') {
     $('e-project').textContent = status.project?.name || 'no project open';
@@ -820,7 +820,7 @@ async function renderNotify() {
   $('nt-ntfy-on').checked = n.ntfy.enabled;
   $('nt-email-on').checked = n.email.enabled;
   if (document.activeElement !== $('nt-email-user')) $('nt-email-user').value = n.email.user || '';
-  if (document.activeElement !== $('nt-email-recipients')) $('nt-email-recipients').value = (n.email.recipients || []).join(', ');
+  renderDestinations('email', 'nt-email-targets', n.email.recipients || []);
   $('nt-email-has').className = `pill ${has.email ? 'ok' : 'bad'}`;
   $('nt-email-has').textContent = has.email ? 'Password saved' : 'No password';
   renderNtfyTopics();
@@ -879,9 +879,41 @@ for (const [kind, pre] of [['telegram', 'nt-tg'], ['whapi', 'nt-wa']]) {
 // ---- ntfy
 const NTFY_TOPIC = /^[-_A-Za-z0-9]{1,64}$/;
 function ntfyTopicList() { return settings.notify.ntfy.topics || []; }
+function renderDestinations(kind, element, values) {
+  const config = settings.notify[kind];
+  $(element).innerHTML = values.map(value => {
+    const target = config.targets?.[value] || {};
+    return `<div class="notify-destination"><span class="chip ${target.enabled === false ? 'destination-off' : ''}"><label><input type="checkbox" data-target-on="${esc(value)}" data-target-kind="${kind}" ${target.enabled === false ? '' : 'checked'} aria-label="Send to ${esc(value)}"></label><button class="link" ${kind === 'ntfy' ? `data-copy-topic="${esc(value)}" title="Copy topic name"` : 'type="button"'}>${esc(value)}</button><button class="chip-x" data-target-delete="${esc(value)}" data-target-kind="${kind}" title="Remove destination">✕</button></span><details><summary>Alerts</summary><div class="destination-events">${EVENTS.map(([event, label]) => `<label class="check"><input type="checkbox" data-target-event="${event}" data-target-value="${esc(value)}" data-target-kind="${kind}" ${target.events?.[event] === false ? '' : 'checked'}> ${esc(label)}${settings.notify.events[event] ? '' : ' (off globally)'}</label>`).join('')}</div></details></div>`;
+  }).join('') || '<div class="empty small">No saved destinations yet.</div>';
+}
+for (const element of ['nt-ntfy-topics', 'nt-email-targets']) {
+  $(element).addEventListener('change', async e => {
+    const t = e.target, kind = t.dataset.targetKind;
+    if (!kind) return;
+    await save(s => {
+      const config = s.notify[kind]; config.targets ||= {};
+      const value = t.dataset.targetOn || t.dataset.targetValue;
+      config.targets[value] ||= {};
+      if (t.dataset.targetOn) config.targets[value].enabled = t.checked;
+      else { config.targets[value].events ||= {}; config.targets[value].events[t.dataset.targetEvent] = t.checked; }
+    });
+    if (t.dataset.targetOn) t.closest('.chip').classList.toggle('destination-off', !t.checked);
+  });
+  $(element).addEventListener('click', async e => {
+    const b = e.target.closest('[data-target-delete]');
+    if (!b) return;
+    await save(s => {
+      const config = s.notify[b.dataset.targetKind], value = b.dataset.targetDelete;
+      const field = b.dataset.targetKind === 'ntfy' ? 'topics' : 'recipients';
+      config[field] = config[field].filter(v => v !== value);
+      if (config.targets) delete config.targets[value];
+      if (!config[field].length) config.enabled = false;
+    });
+    await renderNotify();
+  });
+}
 function renderNtfyTopics() {
-  $('nt-ntfy-topics').innerHTML = ntfyTopicList().map((topic) =>
-    `<span class="chip"><button class="link" data-copy-topic="${esc(topic)}" title="Copy topic name">${esc(topic)}</button> <button class="chip-x" data-del-topic="${esc(topic)}" title="Remove topic">✕</button></span>`).join('') || '<div class="empty small">No topics yet. Add a personal or group topic below.</div>';
+  renderDestinations('ntfy', 'nt-ntfy-topics', ntfyTopicList());
 }
 async function addNtfyTopic(value) {
   const topic = (typeof value === 'string' ? value : $('nt-ntfy-topic').value).trim();
@@ -933,7 +965,7 @@ $('nt-ntfy-save').addEventListener('click', async () => {
 const EMAIL_ADDRESS = /^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/;
 function emailForm() {
   const user = $('nt-email-user').value.trim();
-  const recipients = [...new Set($('nt-email-recipients').value.split(/[,;\n]+/).map((s) => s.trim().toLowerCase()).filter(Boolean))];
+  const recipients = settings.notify.email.recipients || [];
   if (!EMAIL_ADDRESS.test(user)) throw new Error('Enter your Gmail sender address');
   if (!recipients.length || recipients.some((r) => !EMAIL_ADDRESS.test(r))) throw new Error('Enter recipient email addresses separated by commas');
   return { user, recipients };
@@ -942,10 +974,19 @@ async function saveEmailForm() {
   const fields = emailForm();
   await save((s) => Object.assign(s.notify.email, fields));
 }
-for (const id of ['nt-email-user', 'nt-email-recipients']) {
+async function addEmailRecipients() {
+  const values = $('nt-email-recipients').value.split(/[,;\n]+/).map(v => v.trim().toLowerCase()).filter(Boolean);
+  if (!values.length) return;
+  if (values.some(v => !EMAIL_ADDRESS.test(v))) return toast('Enter valid plain email addresses', true);
+  await save(s => { s.notify.email.recipients = [...new Set([...(s.notify.email.recipients || []), ...values])]; });
+  $('nt-email-recipients').value = '';
+  renderDestinations('email', 'nt-email-targets', settings.notify.email.recipients);
+}
+$('nt-email-add').addEventListener('click', addEmailRecipients);
+$('nt-email-recipients').addEventListener('keydown', e => { if (e.key === 'Enter') addEmailRecipients(); });
+for (const id of ['nt-email-user']) {
   $(id).addEventListener('change', () => save((s) => {
     s.notify.email.user = $('nt-email-user').value.trim();
-    s.notify.email.recipients = $('nt-email-recipients').value.split(/[,;\n]+/).map((v) => v.trim()).filter(Boolean);
   }));
 }
 $('nt-email-on').addEventListener('change', async (e) => {
@@ -1033,16 +1074,16 @@ function encStatus(it) {
   if (it.state === 'encoding') {
     return `<span class="bar"><i style="width:${Math.round(it.pct || 0)}%"></i></span>${Math.round(it.pct || 0)}%`;
   }
-  if (it.state === 'done') return `<span class="state done">Done</span>${it.tookMs ? ` <span class="muted small">${fmtSec(Math.round(it.tookMs / 1000))}</span>` : ''}`;
+  if (it.state === 'done') return `<span class="state done">Done</span>${it.tookMs ? ` <span class="muted small">${fmtSec(Math.round(it.tookMs / 1000))}</span>` : ''}${it.copyState === 'copying' ? '<div class="muted small">Copying…</div>' : it.copyState === 'copied' ? `<div class="small" title="${esc(it.copiedTo)}">Copied</div>` : it.copyState === 'failed' ? `<div class="err">Copy failed: ${esc(it.copyError)}</div>` : ''}`;
   if (it.state === 'failed') return `<span class="state failed">Failed</span><div class="err">${esc(it.error || '')}</div>`;
   return '<span class="state">Waiting</span>';
 }
 
 function renderEncoder() {
-  const key = JSON.stringify(enc.groups.map((g) => [g.id, g.name, g.preset, g.dir, g.suffix,
+  const key = JSON.stringify(enc.groups.map((g) => [g.id, g.name, g.preset, g.dir, g.suffix, g.copyEnabled, g.copyDir,
     g.items.map((i) => [i.id, i.preset, i.dir, i.state === 'encoding'])]));
   const box = $('enc-groups');
-  const typing = document.activeElement && box.contains(document.activeElement) && document.activeElement.tagName === 'INPUT';
+  const typing = document.activeElement && box.contains(document.activeElement) && document.activeElement.matches('input[type="text"]');
   if (key !== encStructure && !typing) {
     encStructure = key;
     box.innerHTML = enc.groups.length ? enc.groups.map((g) => `
@@ -1059,6 +1100,7 @@ function renderEncoder() {
             <button class="btn icon g-del" title="Remove group">✕</button>
           </div>
         </div>
+        <div class="enc-copy"><label><input type="checkbox" class="g-copy-enabled" ${g.copyEnabled ? 'checked' : ''}> Copy finished files</label><div class="enc-path ${g.copyEnabled ? '' : 'hidden'}"><input type="text" class="g-copy-dir" value="${esc(g.copyDir || '')}" placeholder="Copy destination folder" ${g.copyEnabled ? '' : 'disabled'}><button class="btn g-copy-browse" ${g.copyEnabled ? '' : 'disabled'}>Browse…</button></div></div>
         ${g.items.length ? `<table class="enc">
           <colgroup><col style="width:34%"><col style="width:22%"><col style="width:24%"><col style="width:13%"><col style="width:7%"></colgroup>
           <thead><tr><th>File</th><th>Preset</th><th>Output folder</th><th>Status</th><th></th></tr></thead>
@@ -1105,6 +1147,15 @@ $('enc-groups').addEventListener('change', (e) => {
   if (t.classList.contains('g-preset')) encCall('updateGroup', { id: g, fields: { preset: t.value } });
   if (t.classList.contains('g-dir')) encCall('updateGroup', { id: g, fields: { dir: t.value.trim() } });
   if (t.classList.contains('g-suffix')) encCall('updateGroup', { id: g, fields: { suffix: t.value } });
+  if (t.classList.contains('g-copy-enabled')) {
+    const row = t.closest('.enc-copy').querySelector('.enc-path');
+    row.classList.toggle('hidden', !t.checked);
+    row.querySelector('.g-copy-dir').disabled = !t.checked;
+    row.querySelector('.g-copy-browse').disabled = !t.checked;
+    if (!t.checked) row.querySelector('.g-copy-dir').value = '';
+    encCall('updateGroup', { id: g, fields: { copyEnabled: t.checked } });
+  }
+  if (t.classList.contains('g-copy-dir')) encCall('updateGroup', { id: g, fields: { copyDir: t.value.trim() } });
   if (t.classList.contains('i-preset')) encCall('updateItem', { group: g, id: itemOf(t), fields: { preset: t.value } });
 });
 
@@ -1116,6 +1167,9 @@ $('enc-groups').addEventListener('click', async (e) => {
   if (b.classList.contains('g-browse')) {
     const p = await pilot.pickFolder(grp?.dir);
     if (p) encCall('updateGroup', { id: g, fields: { dir: p } });
+  } else if (b.classList.contains('g-copy-browse')) {
+    const p = await pilot.pickFolder(grp?.copyDir);
+    if (p) encCall('updateGroup', { id: g, fields: { copyDir: p } });
   } else if (b.classList.contains('g-files')) {
     const files = await pilot.pickFiles();
     if (files.length) encCall('addPaths', { id: g, paths: files });

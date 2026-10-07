@@ -49,11 +49,12 @@ still require IT to allow the executable, even though no installation is needed.
    If your account does not offer App Passwords, this setup cannot be used.
 2. On **Notifications → Email**, enter the Gmail sender address and save that App
    Password (not your usual Gmail password). It is encrypted for the Windows user.
-3. Enter recipient addresses separated by commas: your Gmail address, office address,
+3. Add recipient addresses with **+ Add** (several may be separated by commas): your Gmail address, office address,
    and/or other team addresses. Recipients need no mail-server setup. Switch Email on.
 4. Enable ntfy with a matching phone subscription. Use **Test email only** and
    **Test ntfy only** to check each channel, then select the event checkboxes you want.
-   Both enabled services receive the same selected events. Email recipients each
+   Each saved topic or email recipient has an on/off checkbox and an **Alerts** menu
+   for choosing its events. Global event checkboxes must also be enabled. Email recipients each
    get a separate message, with the first event line as subject and full text as body.
 
 Email uses Gmail SMTP with TLS on port 465. The office network must allow that
@@ -69,11 +70,26 @@ If a test fails, Activity includes the available network/certificate error detai
 Certificate checks remain enabled; proxy login or firewall restrictions may require IT.
 
 Add personal and group topics with **+ Add**, or **Generate random topic**.
-Click a saved topic to copy its name; **✕** removes it. All saved topics receive
-the same selected events. Each person subscribes to the appropriate topics in
+Click a saved topic to copy its name; **✕** removes it. Switch a destination off
+to keep it saved without sending there, or use **Alerts** to route specific events.
+Each person subscribes to the appropriate topics in
 the ntfy phone app. Reuse the team topic on all editing PCs and add personal
 topics on the relevant PCs. Subscribing to both topics produces two notifications
 for an event sent to both. Existing single-topic settings are preserved on upgrade.
+
+## Encoder (2.0.1)
+Encoder asks before saving and closing the current Resolve project, then uses a
+uniquely named disposable empty project for its queue. No open project is required.
+After finishing or stopping, it deletes the temporary project and leaves the
+original project closed. If saving fails, encoding does not start. Keep the
+temporary project open during encoding; a project switch stops the queue safely.
+An interrupted connection or crash may leave the temporary project for manual cleanup.
+
+Each group can enable **Copy finished files** and choose a destination. The folder
+field appears when checked; switching copying off hides it and clears its path.
+Copies keep the original export, avoid existing names, and verify matching size.
+Group completion messages include the copied count and destination. The after-queue
+action waits for copies and cleanup; copy or cleanup errors prevent automatic shutdown.
 
 For office alerts without linking your primary WhatsApp number, use the existing
 ntfy phone push or Telegram bot integration. For ntfy, subscribe on the phone and

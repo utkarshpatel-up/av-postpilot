@@ -421,7 +421,7 @@
           <button class="btn" id="enc-stop">Stop after current</button>
           <button class="btn" id="enc-clear">Clear finished</button>
         </div>
-        <p class="muted small">Uses the project open in Resolve for temporary timelines. Resolve is busy while encoding. <b>The queue is saved automatically</b> after every change, including when PostPilot or the PC is closed.</p>
+        <p class="muted small">Encodes in a separate empty temporary Resolve project. After your confirmation, PostPilot automatically saves and closes your open project. When encoding finishes, it removes the temporary project and your saved project stays closed, ready for your selected after-queue action. No open project is required. Keep the temporary project open while encoding. <b>The queue is saved automatically</b> after every change.</p>
       </div>
     </section>
 
@@ -442,7 +442,7 @@
           <button class="btn" id="nt-ntfy-add">+ Add</button>
           <button class="btn" id="nt-ntfy-gen">Generate random topic</button>
         </div>
-        <p class="muted small">Every saved topic receives the same selected alerts. Click a topic to copy its name; ✕ removes it. Use the same group topic on every editing PC, plus a personal topic where needed. Subscribing to both receives two copies. For an unprotected topic, anyone who knows its name can read the alerts.</p>
+        <p class="muted small">Switch a topic on or off without removing it. Open Alerts to choose which enabled notification types go there. Click the topic name to copy it; ✕ removes it. For an unprotected topic, anyone who knows its name can read the alerts.</p>
         <details class="more">
           <summary class="muted small">Own ntfy server or access token (optional)</summary>
           <div class="row">
@@ -476,11 +476,13 @@
           <span class="pill" id="nt-email-has"></span>
         </div>
         <p class="muted small">In your Google Account, enable <b>2-Step Verification</b>, then create an <b>App Password</b> named AV PostPilot. Enter it here. If App Passwords is unavailable for your account, this Gmail setup cannot be used. Changing your Google password revokes App Passwords.</p>
+        <div class="chips" id="nt-email-targets"></div>
         <div class="row">
-          <label for="nt-email-recipients">Send alerts to</label>
+          <label for="nt-email-recipients">Add recipient</label>
           <input type="text" id="nt-email-recipients" class="grow" placeholder="you@gmail.com, you@office.com">
+          <button class="btn" id="nt-email-add">+ Add</button>
         </div>
-        <p class="muted small">Separate addresses with commas. Each recipient receives a separate email. The first event line is the subject; the full message is the body. Delivery depends on your network and Gmail limits.</p>
+        <p class="muted small">Switch recipients on or off without removing them. Open Alerts to choose their notification types; ✕ removes them. Add several addresses separated by commas. The first event line is the subject; the full message is the body.</p>
         <div class="row"><button class="btn" id="nt-email-test">Test email only</button></div>
       </div>
 

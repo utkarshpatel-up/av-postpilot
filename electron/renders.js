@@ -99,7 +99,8 @@ class RenderWatcher {
         && Date.now() - this.idleSince >= this.settleMs) {
       this.idleSince = null;
       this.active = false;
-      this.queueStopped(status);
+      this.settling = true;
+      this.queueStopped(status).finally(() => { this.settling = false; });
     }
     this.wasRendering = status.rendering;
   }

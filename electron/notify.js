@@ -96,17 +96,18 @@ class Notifier {
   async notify(event, text) {
     const n = this.getSettings().notify;
     if (event && !n.events[event]) return 0;
-    return this.sendAll(`${text}\n— ${this.pc}`);
+    return (await this.sendReport(`${text}\n— ${this.pc}`, null, event)).sent;
   }
 
   async sendAll(text) {
     return (await this.sendReport(text)).sent;
   }
 
-  async sendReport(text, only = null) {
+  async sendReport(text, only = null, event = null) {
     const n = this.getSettings().notify;
     const jobs = [];
     const include = (kind) => !only || only === kind;
+    const selected = (config, id) => config.targets?.[id]?.enabled !== false && (!event || config.targets?.[id]?.events?.[event] !== false);
     const tg = this.getSecret('telegram');
     if (include('telegram') && n.telegram.enabled && tg) {
       for (const c of n.telegram.chats) jobs.push(['Telegram', c.name || c.id, () => telegram.send(tg, c.id, text)]);
@@ -117,7 +118,7 @@ class Notifier {
     }
     if (include('ntfy') && n.ntfy?.enabled) {
       const lines = text.split('\n');
-      for (const topic of ntfyTopics(n.ntfy)) jobs.push(['ntfy', topic, () => ntfy.send(n.ntfy.server, topic, this.getSecret('ntfy'), {
+      for (const topic of ntfyTopics(n.ntfy).filter(t => selected(n.ntfy, t))) jobs.push(['ntfy', topic, () => ntfy.send(n.ntfy.server, topic, this.getSecret('ntfy'), {
         title: lines[0].slice(0, 120),            // first line = notification title
         message: lines.slice(1).join('\n') || lines[0],
         priority: /⚠️|failed|shuts down|⏻/i.test(text) ? 4 : 3,
@@ -125,7 +126,7 @@ class Notifier {
     }
     if (include('email') && n.email?.enabled) {
       try {
-        for (const to of recipients(n.email.recipients)) {
+        for (const to of recipients(n.email.recipients).filter(t => selected(n.email, t))) {
           jobs.push(['Email', to, () => this.emailSend(n.email, this.getSecret('email'), to, text)]);
         }
       } catch (err) { jobs.push(['Email', 'recipients', () => Promise.reject(err)]); }

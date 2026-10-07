@@ -198,7 +198,7 @@ async function pollOnce() {
     lastConnected = status.connected;
   }
   send('status', status);
-  renders.update(status);
+  if (!encoder.running) renders.update(status);
   updateTray();
 }
 
@@ -344,12 +344,23 @@ const renders = new RenderWatcher({
 });
 
 const encoder = new Encoder({
+  confirmStart: async (project) => {
+    if (!project) return true;
+    const result = await dialog.showMessageBox(win, {
+      type: 'warning', title: 'Encode in a temporary project?',
+      message: `Save and close "${project.name}" to start encoding?`,
+      detail: 'PostPilot will automatically save and close your project, then encode in a separate empty temporary project. When the queue finishes or stops, it will delete the temporary project.',
+      buttons: ['Save and start encoding', 'Cancel'], defaultId: 1, cancelId: 1,
+    });
+    return result.response === 0;
+  },
   bridge, notifier, log, getSettings: () => settings,
   loadState: () => state.encoder,
   saveState: (e) => { state.encoder = e; writeJson(STATE_FILE, state); },
   onChange: () => { send('encoder', encoder.summary()); updateTray(); },
   onQueueDone: afterQueue,
 });
+autosaver.isPaused = () => encoder.running;
 
 const sceneQueue = new SceneQueue({
   bridge, notifier, log, getSettings: () => settings,
@@ -601,6 +612,7 @@ ipcMain.handle('scene-add', (_e, names) => {
 ipcMain.handle('scene-remove', (_e, i) => sceneQueue.remove(i));
 ipcMain.handle('scene-clear', () => sceneQueue.clearFinished());
 ipcMain.handle('scene-start', () => {
+  if (encoder.running) return { ok: false, error: 'Finish Encoder before starting scene cuts' };
   if (!status.connected) return { ok: false, error: 'Resolve is not connected' };
   // Answer straight away: the queue itself can run for hours.
   const run = sceneQueue.start(status.project?.name);
@@ -623,9 +635,13 @@ const ENC_ACTIONS = {
 ipcMain.handle('encoder', async (_e, { action, args }) => {
   try {
     if (action === 'start') {
-      if (!status.connected || !status.project) return { ok: false, error: 'Open a project in Resolve first (temporary items are made there and removed afterwards)' };
+      if (!status.connected) return { ok: false, error: 'Connect to Resolve first' };
+      if (autosaver.running) return { ok: false, error: 'Wait for the current auto-save to finish' };
+      if (sceneQueue.running || renders.active || renders.settling || renders.hdBatch || renders.finished.length || renders.pendingCopies || shutdownAt) return { ok: false, error: 'Finish the current scene/render queue and cancel any shutdown countdown before starting Encoder' };
       // Answer straight away: the queue can run for hours.
-      return Promise.race([encoder.start(), new Promise((r) => setTimeout(() => r({ ok: true, started: true }), 800))]);
+      return new Promise((resolve, reject) => {
+        encoder.start(() => resolve({ ok: true, started: true })).then(resolve, reject);
+      });
     }
     const fn = ENC_ACTIONS[action];
     if (!fn) return { ok: false, error: `unknown action ${action}` };
@@ -647,8 +663,18 @@ ipcMain.handle('pick-files', async (_e, current) => {
   return r.canceled ? [] : r.filePaths;
 });
 ipcMain.handle('render-presets', async () => {
-  if (!status.connected || !status.project) return { ok: false, error: 'Open a project in Resolve first' };
-  return bridge.renderPresets();
+  const st = await bridge.status();
+  if (!st.connected) return { ok: false, error: 'Connect to Resolve first' };
+  if (st.project) return bridge.renderPresets();
+  if (encoder.running || autosaver.running) return { ok: false, error: 'Wait for the current operation to finish' };
+  const token = require('crypto').randomUUID();
+  const begin = await bridge.encoderBegin({ token, name: `PostPilot Encoder temp ${token}`, originalId: '' });
+  if (!begin.ok) return begin;
+  try { return await bridge.renderPresets(); }
+  finally {
+    const finish = await bridge.encoderFinish({ token });
+    if (!finish.ok) log('warn', `Preset workspace cleanup: ${finish.error}`);
+  }
 });
 ipcMain.handle('shutdown-now', () => scheduleShutdown('manual', countdown(settings.manual.shutdownSeconds)));
 
@@ -731,6 +757,7 @@ app.on('second-instance', () => {
   if (settings.launchResolve) launchResolve();
 });
 app.on('before-quit', e => {
+  if (encoder.running) { e.preventDefault(); log('warn', 'Stop Encoder and wait for the current file and project cleanup before quitting'); showWindow(); return; }
   if (databaseBackup.running) { e.preventDefault(); log('warn', 'Wait for the library backup to finish before quitting'); showWindow(); return; }
   quitting = true; bridge.stop();
 });

@@ -42,6 +42,14 @@ test('safeName strips characters Windows does not allow', () => {
   assert.strictEqual(safeName('name. '), 'name');
 });
 
+test('temporary encoder projects are never exported to backup folders', async () => {
+  const dir = tmpdir();
+  const bridge = { status: async () => ({ connected: true, encoderProject: true, project: { name: 'Temporary' } }), exportProject: async () => { throw Error('Must not export'); } };
+  const result = await makeSaver([{ enabled: true, path: dir }], bridge).run();
+  assert.match(result.message, /Skipped the temporary encoder project/);
+  assert.deepEqual(fs.readdirSync(dir), []);
+});
+
 test('prune keeps the newest N even when all are old', () => {
   const dir = tmpdir();
   const old = Date.now() / 1000 - 90 * 86400;

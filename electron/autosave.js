@@ -65,6 +65,7 @@ class AutoSaver {
   }
 
   async run(reason = 'manual') {
+    if (this.isPaused?.()) return { ok: true, message: 'Auto-save paused while Encoder uses its temporary project' };
     if (this.running) return { ok: false, message: 'A save is already running' };
     this.running = true;
     this.onChange();
@@ -96,6 +97,7 @@ class AutoSaver {
 
     const st = await this.bridge.status();
     if (!st.connected) return { ok: false, message: 'Resolve is not connected' };
+    if (st.encoderProject) return { ok: true, message: 'Skipped the temporary encoder project' };
     if (!st.project) return { ok: false, message: 'No project open' };
     const project = st.project.name;
     if (s.skipUntitled && /^Untitled Project/i.test(project)) {

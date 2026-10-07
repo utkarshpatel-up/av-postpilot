@@ -16,6 +16,9 @@ function fakeBridge({ fail = [] } = {}) {
   const jobs = {};
   return {
     calls,
+    status: async () => ({ connected: true, project: { name: 'Main project', id: 'main-id' } }),
+    encoderBegin: async (a) => { calls.begin = a; return { ok: true }; },
+    encoderFinish: async (a) => { calls.cleanup.push(a.token); return { ok: true }; },
     encodeStart: async (a) => {
       calls.start.push(a);
       if (fail.includes(path.basename(a.file))) return { ok: false, error: 'could not import' };
@@ -34,11 +37,11 @@ function fakeBridge({ fail = [] } = {}) {
   };
 }
 
-function makeEncoder(bridge, { saved = null, after = [] } = {}) {
+function makeEncoder(bridge, { saved = null, after = [], confirmStart } = {}) {
   const notes = [];
   let state = saved;
   const e = new Encoder({
-    bridge, log: () => {}, onChange: () => {}, pollMs: 1,
+    bridge, log: () => {}, onChange: () => {}, pollMs: 1, confirmStart,
     notifier: { notify: async (ev, t) => notes.push({ ev, t }) },
     onQueueDone: (a, what) => after.push([a, what]),
     getSettings: () => ({ encoder: { afterQueue: 'shutdown' } }),
@@ -65,9 +68,10 @@ test('group preset/folder apply to files unless a file has its own', async () =>
     ['c.mp4', 'HEVC 100', 'out2', 'c'],
   ]);
   assert.ok(g1.items.every((i) => i.state === 'done' && i.output));
-  assert.strictEqual(bridge.calls.cleanup.length, 1, 'temporary bin removed once at the end');
-  assert.match(bridge.calls.cleanup[0], /^PostPilot Encoder temp /);
-  assert.ok(bridge.calls.start.every((c) => c.folder === bridge.calls.cleanup[0] && c.timeline.startsWith(c.folder)));
+  assert.strictEqual(bridge.calls.cleanup.length, 1, 'temporary project removed once at the end');
+  assert.strictEqual(bridge.calls.cleanup[0], bridge.calls.begin.token);
+  assert.strictEqual(bridge.calls.begin.originalId, 'main-id');
+  assert.ok(bridge.calls.start.every((c) => c.token === bridge.calls.begin.token && c.timeline.startsWith(c.folder)));
   assert.deepStrictEqual(after, [['shutdown', 'encoder queue']]);
   assert.strictEqual(notes.filter((n) => n.ev === 'encoderGroupDone').length, 2);
   assert.ok(notes.some((n) => n.ev === 'encoderQueueDone' && /3 done/.test(n.t)));
@@ -110,6 +114,97 @@ test('nothing starts without a preset and output folder', async () => {
   const r = await e.start();
   assert.strictEqual(r.ok, false);
   assert.match(r.error, /no preset or output folder/);
+});
+
+function readyEncoder(bridge, options) {
+  const src = tmp(), out = tmp();
+  touch(path.join(src, 'a.mov')); touch(path.join(src, 'b.mov'));
+  const result = makeEncoder(bridge, options);
+  const g = result.e.addGroup({ preset: 'P', dir: out });
+  result.e.addPaths(g.id, [src]);
+  return { ...result, g };
+}
+
+test('cancel leaves the project and queue untouched', async () => {
+  const b = fakeBridge();
+  const { e, g } = readyEncoder(b, { confirmStart: async p => { assert.equal(p.name, 'Main project'); return false; } });
+  assert.equal((await e.start()).cancelled, true);
+  assert.equal(b.calls.begin, undefined);
+  assert.equal(b.calls.start.length, 0);
+  assert.ok(g.items.every(i => i.state === 'waiting'));
+  assert.equal(e.running, false);
+});
+
+test('a failed save or workspace creation never starts encoding', async () => {
+  const b = fakeBridge();
+  b.encoderBegin = async () => ({ ok: false, error: 'Could not save main project' });
+  const { e, after, g } = readyEncoder(b);
+  assert.equal((await e.start()).ok, false);
+  assert.equal(b.calls.start.length, 0);
+  assert.equal(b.calls.cleanup.length, 0);
+  assert.deepEqual(after, []);
+  assert.ok(g.items.every(i => i.state === 'waiting'));
+});
+
+test('encoding works when no project is open', async () => {
+  const b = fakeBridge(); b.status = async () => ({ connected: true });
+  const { e } = readyEncoder(b);
+  assert.equal((await e.start()).done, 2);
+  assert.equal(b.calls.begin.originalId, '');
+});
+
+test('switching projects stops the remaining queue and prevents shutdown', async () => {
+  const b = fakeBridge(); b.jobStatus = async () => ({ ok: false, fatal: true, error: 'Workspace changed' });
+  const { e, after, g } = readyEncoder(b);
+  await e.start();
+  assert.deepEqual(g.items.map(i => i.state), ['failed', 'waiting']);
+  assert.equal(b.calls.start.length, 1);
+  assert.deepEqual(after, []);
+});
+
+test('cleanup failure prevents automatic shutdown', async () => {
+  const b = fakeBridge(); b.encoderFinish = async () => ({ ok: false, error: 'Could not delete temporary project' });
+  const { e, after } = readyEncoder(b);
+  await e.start();
+  assert.deepEqual(after, []);
+});
+
+test('group copies use the exported file, preserve collisions and finish before shutdown', async () => {
+  const b = fakeBridge();
+  const status = b.jobStatus;
+  b.jobStatus = async (...args) => {
+    const s = await status(...args);
+    if (s.status === 'Complete') fs.writeFileSync(path.join(s.dir, s.file), 'encoded video');
+    return s;
+  };
+  const { e, g, after, state, notes } = readyEncoder(b);
+  const copy = tmp(); touch(path.join(copy, 'a.mp4'));
+  e.updateGroup(g.id, { copyEnabled: true, copyDir: copy });
+  await e.start();
+  assert.equal(fs.readFileSync(path.join(copy, 'a.mp4'), 'utf8'), 'x');
+  assert.equal(fs.readFileSync(path.join(copy, 'a (2).mp4'), 'utf8'), 'encoded video');
+  assert.equal(fs.readFileSync(path.join(copy, 'b.mp4'), 'utf8'), 'encoded video');
+  assert.ok(g.items.every(i => i.copyState === 'copied' && fs.existsSync(i.output)));
+  assert.equal(state().groups[0].copyDir, copy);
+  assert.deepEqual(after, [['shutdown', 'encoder queue']]);
+  assert.ok(notes.some(n => n.ev === 'encoderGroupDone' && n.t.includes('Copied: 2 files') && n.t.includes(`Copy destination: ${copy}`)));
+});
+
+test('copy failure preserves successful encoding and prevents shutdown', async () => {
+  const b = fakeBridge();
+  const { e, g, after, notes } = readyEncoder(b);
+  e.updateGroup(g.id, { copyEnabled: true, copyDir: tmp() });
+  await e.start();
+  assert.ok(g.items.every(i => i.state === 'done' && i.copyState === 'failed'));
+  assert.deepEqual(after, []);
+  assert.ok(notes.some(n => n.ev === 'encoderQueueDone' && /copies failed/.test(n.t)));
+});
+
+test('an unreachable copy destination is rejected before closing the project', async () => {
+  const b = fakeBridge(); const { e, g } = readyEncoder(b);
+  e.updateGroup(g.id, { copyEnabled: true, copyDir: path.join(tmp(), 'missing') });
+  assert.equal((await e.start()).ok, false);
+  assert.equal(b.calls.begin, undefined);
 });
 
 test('output names never overwrite an existing file', () => {
