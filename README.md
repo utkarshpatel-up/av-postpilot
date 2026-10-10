@@ -1,8 +1,27 @@
 # AV PostPilot
 
-Edit-bay assistant for DaVinci Resolve Studio (Windows). It talks to Resolve through
-Resolve's own script runner (`fuscript.exe` + `electron/bridge.lua`), so the editing
-PCs need nothing extra installed: no Python.
+Edit-bay assistant for DaVinci Resolve Studio (Windows editing PCs; the library
+backup server can be a Mac). It talks to Resolve through Resolve's own script runner
+(`fuscript.exe` + `electron/bridge.lua`), so the editing PCs need nothing extra
+installed: no Python.
+
+**Current version: 3.0.0** — downloads in `dist/`: Windows installer, Windows portable
+ZIP, macOS ZIPs for Apple Silicon (arm64) and Intel (x64), plus SHA-256 checksums.
+
+## New in 3.0
+- **Stabilization page**: marked shaky clips on one or more timelines; Fusion
+  point tracking on rigid details (Lock by default, Smooth when the camera moves on
+  purpose), Resolve's own stabilizer when the shot has no rigid reference, automatic
+  edge zoom, live progress with times, Review / Approve / Undo onto your timeline,
+  optional marker removal, delete the copies once everything is approved.
+- **When the queue finishes** on Scene Cuts, Renders, Encoder and Stabilization:
+  *Do nothing* / *Just notify* / *Notify and shut down* (with countdown).
+- **Clip Info window**: always-on-top details of the clip under Resolve's playhead
+  (**Ctrl+Alt+I**).
+- **Library Backup**: *Start / Stop scheduled backups* installs the schedule itself
+  (no script to run by hand).
+- Menu order follows the workflow (Stabilization before Episodes); the app reopens the
+  last page you used (Dashboard on the very first start).
 
 ## What it does
 
@@ -11,12 +30,13 @@ PCs need nothing extra installed: no Python.
 | **Dashboard** | Resolve connection, open project/library, auto-save status, shutdown countdown, render queue |
 | **New Project** | Creates the project folders, moves (same drive) or copies the satsang day folders into `Satsang Files`, builds the Resolve project with bins, nested footage and `Master-` / `Edit-` timelines |
 | **Auto-save** | Exports the open project as `.drp` every N minutes to several locations, only when it changed |
-| **Library Backup** | Monitors existing Mac/NAS database dumps; backs up whole PostgreSQL libraries, roles and optional secondary copies on the server |
+| **Library Backup** | Monitors existing Mac/NAS database dumps; backs up whole PostgreSQL libraries, roles and optional secondary copies on the server; Start/Stop scheduled backups |
 | **Scene Cuts** | Queue of timelines for *Detect Scene Cuts*, run one after another |
-| **Stabilization** | Stabilizes marked shaky clips on one or more timelines: Fusion tracking on rigid details (Lock, or Smooth when the camera moves on purpose), Resolve's stabilizer when there is no rigid reference, edge zoom, review/approve onto your timeline |
+| **Stabilization** | Stabilizes marked shaky clips on one or more timelines: Fusion tracking on rigid details (Lock, or Smooth when the camera moves on purpose), Resolve's stabilizer when there is no rigid reference, edge zoom, review/approve onto your timeline, delete approved copies |
 | **Episodes** | Creates episode series with a Text+ title; renames a series later (the `(…)` cue never changes) |
 | **Renders** | Copies each finished render, optional HD review pass (one temporary timeline, individual clips, cleaned up afterwards), shutdown with countdown |
-| **New Project** · **Episodes** · **Encoder** | Project folders / bins / Master-Edit timelines; episode series with plain or colour-bar titles; Media-Encoder-style queue with Resolve presets |
+| **Encoder** | Media-Encoder-style queue with Resolve presets in a disposable project; optional copy of finished files |
+| **Clip Info** (window) | Always-on-top box with the clip under the playhead; Settings switch, tray, Ctrl+Alt+I |
 | **Notifications** | ntfy phone push, Gmail email to personal/office recipients, Telegram and legacy WhatsApp (Whapi.Cloud) |
 
 Footage is never deleted.
@@ -26,6 +46,7 @@ Footage is never deleted.
 2. Resolve: *Preferences → System → General → External scripting using: **Local***.
 3. Resolve: *Preferences → User → Editing → Standard Generator Duration* = episode title length.
 4. PostPilot: set the Auto-save locations; tokens on the Notifications page.
+5. Optional: Settings → *Show the Clip Info window* and its shortcut.
 
 ## Development
 ```
@@ -34,6 +55,7 @@ npm start          # run the app
 npm test           # unit tests (no Resolve needed)
 npm run dist:win   # build the Windows installer into dist/
 npm run dist:zip   # build the complete extract-and-run Windows ZIP into dist/
+npm run dist:mac   # macOS ZIPs (on a Mac, or automatically by GitHub Actions on push)
 ```
 The ZIP includes Electron and all app dependencies; target PCs do not need Node.js,
 npm or Python. Resolve Studio must already be installed, with local scripting enabled.
@@ -117,12 +139,25 @@ stabilization onto your clip (exported/imported Fusion comp, or Resolve's stabil
 run on your clip) and restores its own clip colour; optionally the markers are
 removed. ↺ Undo removes a Fusion stabilization again and restores markers; a Resolve
 stabilization is reset in the Color page (Tracker > Stabilizer). Approve refuses if
-the clip was edited after the run. Results: `stabilization-last-report.json`.
+the clip was edited after the run. Once every stabilized clip of a copy is approved,
+**🗑 Delete stabilized copies** removes those copy timelines (only timelines PostPilot
+created; it switches back to your timeline first). Results:
+`stabilization-last-report.json`.
 
 Measured on 4K test shots: rigid backgrounds about half the shake left, no black
 edges; tight audience shots via Resolve's stabilizer. Tools for checking new kinds
 of footage are in `dev/` (`stab_harness.js`, `measure_shake.js`, `measure_points.js`,
 `edge_check.js`).
+
+## When a queue finishes (all modules)
+Scene Cuts, Renders, Encoder and Stabilization each have **When the queue finishes**:
+- **Do nothing** — that module sends no messages (render failures and shutdown
+  warnings are still sent);
+- **Just notify** — messages go to the enabled channels and events on Notifications;
+- **Notify and shut down** — plus a shutdown with the module's own min/s countdown,
+  cancellable from the app, the Dashboard and the tray.
+
+The global switches and per-event checkboxes on Notifications still apply on top.
 
 ## Clip Info window
 Settings → *Show the Clip Info window* (or tray, or **Ctrl+Alt+I**, changeable in
@@ -132,11 +167,14 @@ duration, length in frames, timeline In/Out, resolution, frame rate, codec;
 
 ## Scheduled library backups (3.0)
 Library Backup → **Start scheduled backups** installs the schedule itself (launchd
-on Mac, Task Scheduler on Windows) for the daily times; **Stop** removes it. Runs
-while PostPilot is closed; the user must stay logged in. The script export is still
-under *Advanced*.
+on Mac, Task Scheduler on Windows) for the daily times, together with the hourly
+health check; **Stop** removes both. The page shows *Scheduled daily at …*. Press
+Start again after changing the times. Runs while PostPilot is closed; the user must
+stay logged in (a locked screen is fine). Needs the installed/packaged app, not
+`npm start`. The old script export is still under *Advanced* (for example for a
+logged-out Windows task, which asks for the account password).
 
-## Encoder (2.0.1)
+## Encoder
 Encoder asks before saving and closing the current Resolve project, then uses a
 uniquely named disposable empty project for its queue. No open project is required.
 After finishing or stopping, it deletes the temporary project and leaves the
@@ -172,11 +210,17 @@ templates for proactive alerts; it is not implemented in this version.
 - Loading the render preset that's already selected is ignored: switch away first.
 - While rendering, Resolve doesn't report the open library; between jobs it briefly reports "not rendering" (15 s settle).
 - Individual-clips renders add a frame number to file names; web presets can't render individual clips.
+- Fusion comp frame 0 is the clip's first frame on the timeline (`COMPN_GlobalStart` is the source start).
+- The Tracker tool's first tracker is IntelliTrack, which drifts slowly; PostPilot adds classic point trackers.
+- Scripts cannot move the playhead while the Fusion page is open: PostPilot returns to the Edit page first.
+- Opening a clip on the Fusion page creates an empty comp; empty comps don't count as Fusion work.
+- Stabilizer settings of `TimelineItem:Stabilize()` can't be set by script (defaults are used) or reset by script.
+- Approving copies Fusion stabilization with `ExportFusionComp` / `ImportFusionComp`.
 
 ## Also in this repo
 `resolve-db-backup/`: backup and restore scripts for the Mac PostgreSQL project server (launchd, project-count alarm, restore into a separate `restore_…` library). See `resolve-db-backup/HOW_TO_RESTORE.txt`.
 
-## Library backup setup (2.0.0)
+## Library backup setup
 
 On editing computers, select **Library Backup → Monitor shared backups** and choose
 the shared backup folder from the server running PostPilot.
@@ -200,9 +244,9 @@ compatible), local backup folder, database host/user/port and optional existing 
 folder. Save the database password, **Test connection & list libraries**, then
 **Back up now**. The engine also runs manually on Mac with its PostgreSQL bin path.
 It creates a dedicated `AV-PostPilot-Libraries` folder and never modifies the database.
-On Mac, **Export Mac schedule setup** exports a user launchd agent for the new engine;
-run `bash install.sh` in that exported folder. Keep the configuring Mac user logged in
-with the login keychain unlocked. Disable the original backup schedule before replacing
+On Mac, **Start scheduled backups** installs a user launchd agent for the new engine
+(the exported `install.sh` route remains under *Advanced*). Keep the configuring Mac
+user logged in with the login keychain unlocked. Disable the original backup schedule before replacing
 it. The new engine uses the app's ntfy/email settings.
 It uses custom-format `pg_dump`, checks the archive listing, backs up roles/users,
 and copies to the secondary destination. Failed secondary copies are reported while
@@ -220,24 +264,24 @@ relying on backups; the app does not restore or overwrite live libraries.
 Daily backup times appear as editable AM/PM chips. Click a chip to edit it, choose
 hour/minute/AM or PM, and save; **+ Add time** adds another trigger and **×** removes
 one. At least one time is required and duplicates are rejected. Existing 24-hour
-settings are preserved. Export and run schedule setup again after changing times;
+settings are preserved. Press **Start scheduled backups** again after changing times;
 the scheduler uses the server's local clock.
 
-On Windows, **Export Windows schedule setup** produces a PowerShell Task Scheduler
-installer. Run it as the same Windows account that saved PostPilot settings and
-credentials. Default tasks require that user to stay logged in. The logged-out option
-prompts for that Windows account's password; local policy may require IT assistance.
-PostPilot need not remain open. Keep its extracted folder at the same path, use UNC
-NAS paths, and re-export after changing times or moving the app. An existing backup
+On Windows, **Start scheduled backups** registers the Task Scheduler tasks for the
+Windows account that saved PostPilot settings and credentials; that user must stay
+logged in. For a task that runs while logged out, use *Advanced → Export Windows
+schedule setup* (it prompts for that account's password; local policy may require IT
+assistance). PostPilot need not remain open. Keep its folder at the same path, use UNC
+NAS paths, and press Start again after changing times or moving the app. An existing backup
 lock blocks concurrent runs; after an interrupted run remove it only when no backup
 process is active. Failure and deletion alerts use enabled notification channels;
 successful-backup alerts are optional on Notifications.
 
 **Library backup is overdue** on Notifications enables age-based phone/email alerts
 on the computer set to server mode. Its threshold is **Notify me if older than** in
-Library Backup. The server checks every five minutes while the app runs. Schedule
-exports include a separate hourly health task so missed backup jobs can be detected
-with the app closed. Re-export and install the schedule to add this task. Server
+Library Backup. The server checks every five minutes while the app runs. The installed
+schedule includes a separate hourly health task so missed backup jobs can be detected
+with the app closed. Server
 power/network and the scheduling account's credentials must be available; a powered-off
 server cannot send an alert. Mac user launchd requires the account to remain logged in.
 Editing computers in monitor mode do not send these alerts. Each library alerts once
