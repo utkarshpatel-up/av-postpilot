@@ -110,6 +110,7 @@ class ResolveBridge {
   }
 
   status() { return this.request('status', 15000); }
+  stabilize(args) { return this.request(`stabilize\t${toLua(args)}`, 60000); }
   setupProject(args) { return this.request(`setup\t${toLua(args)}`, 60 * 60 * 1000); }
   createSeries(args) { return this.request(`series\t${toLua(args)}`, 10 * 60 * 1000); }
   barsStill(dir) { return this.request(`barsstill	${toLua({ dir })}`, 2 * 60 * 1000); }

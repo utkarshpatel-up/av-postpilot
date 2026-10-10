@@ -597,6 +597,7 @@ local function stoprender()
 end
 
 ---------------------------------------------------------------- main loop
+local stabilize
 reply({ ok = true, ready = true })
 while true do
   local line = io.read('*l')
@@ -610,6 +611,10 @@ while true do
         return { ok = false, error = 'Finish Encoder before modifying or backing up a project' }
       end
       if cmd == 'status' then return status()
+      elseif cmd == 'stabilize' then
+        if encoderSession then return {ok=false,error='Finish Encoder first'} end
+        stabilize = stabilize or dofile('stabilization.lua')(connect, array)
+        return stabilize(parse(arg))
       elseif cmd == 'export' then return export(arg)
       elseif cmd == 'save' then return save()
       elseif cmd == 'setup' then return setup(parse(arg))

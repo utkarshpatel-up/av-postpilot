@@ -13,6 +13,8 @@ const { RenderWatcher, copyVerified } = require('./renders');
 const { collectHdFiles } = require('./hdreview');
 const { SceneQueue } = require('./scenequeue');
 const { Encoder } = require('./encoder');
+const { Stabilization } = require('./stabilization');
+const { createFrameGrabber } = require('./stabilization-frames');
 const seriesList = require('./series-list');
 const libraryBackup = require('./library-backup');
 const { checkOverdue } = require('./library-overdue');
@@ -128,6 +130,7 @@ function log(level, msg) {
 const bridgeLua = path.join(DATA, 'bridge.lua');
 fs.mkdirSync(DATA, { recursive: true });
 fs.writeFileSync(bridgeLua, fs.readFileSync(path.join(__dirname, 'bridge.lua')));
+fs.writeFileSync(path.join(DATA, 'stabilization.lua'), fs.readFileSync(path.join(__dirname, 'stabilization.lua')));
 
 const bridge = new ResolveBridge({
   getFuscriptPath: () => process.platform === 'darwin' ? '/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fuscript' : path.join(path.dirname(settings.resolvePath), 'fuscript.exe'),
@@ -360,7 +363,10 @@ const encoder = new Encoder({
   onChange: () => { send('encoder', encoder.summary()); updateTray(); },
   onQueueDone: afterQueue,
 });
-autosaver.isPaused = () => encoder.running;
+const stabilization = new Stabilization({ bridge, log, onChange: s => send('stabilize', s),
+  grab:createFrameGrabber({bridge,nativeImage,directory:path.join(DATA,'stabilization-check')}),
+  saveReport:report=>fs.writeFileSync(path.join(DATA,'stabilization-last-report.json'),JSON.stringify(report,null,2)) });
+autosaver.isPaused = () => encoder.running || stabilization.running;
 
 const sceneQueue = new SceneQueue({
   bridge, notifier, log, getSettings: () => settings,
@@ -486,6 +492,23 @@ ipcMain.handle('get-initial', () => ({
   scene: sceneQueue.summary(), encoder: encoder.summary(), renders: renders.summary(), shutdownAt, shutdownReason,
   pc: os.hostname(), version: app.getVersion(),
 }));
+ipcMain.handle('stabilize', async (_e, args) => {
+  try {
+    if (args.action === 'summary') return { ok: true, ...stabilization.summary() };
+    if (args.action === 'stop') return stabilization.stop();
+    if (encoder.running || sceneQueue.running || autosaver.running || shutdownAt) return { ok: false, error: 'Finish the current operation and cancel any planned shutdown first' };
+    if (args.action === 'scan') return await stabilization.scan(args.color);
+    if (args.action === 'start') return await stabilization.start(args.keys || [], args.anchors || []);
+    if (stabilization.running) return { ok: false, error: 'Wait for tracking to finish' };
+    if (args.action === 'preview') {
+      const file = path.join(DATA, 'stabilization-preview.png');
+      const result = await bridge.stabilize({ action: 'preview', key: args.key, frame: args.frame, file });
+      if (result.ok) return { ok: true, frame: result.frame, image: nativeImage.createFromPath(file).resize({ width: 1280 }).toDataURL() };
+      return result;
+    }
+    return { ok: false, error: 'Unknown stabilization action' };
+  } catch (error) { return { ok: false, error: error.message }; }
+});
 ipcMain.handle('save-settings', (_e, next) => applySettings(next));
 ipcMain.handle('save-now', () => autosaver.run('manual'));
 ipcMain.handle('launch-resolve', () => launchResolve());
@@ -529,6 +552,7 @@ ipcMain.handle('scan-days', (_e, dirs) => dirs.map((d) => {
 let projectBusy = false;
 // footage: 'move' (same drive, else copy) | 'copy' | 'leave' (import from where it is)
 ipcMain.handle('create-project', async (_e, { name, location, days, footage }) => {
+  if (stabilization.running) return { ok: false, error: 'Finish stabilization first' };
   footage = ['move', 'copy', 'leave'].includes(footage) ? footage : 'move';
   const move = footage === 'move';
   if (projectBusy) return { ok: false, error: 'A project is already being created' };
@@ -612,6 +636,7 @@ ipcMain.handle('scene-add', (_e, names) => {
 ipcMain.handle('scene-remove', (_e, i) => sceneQueue.remove(i));
 ipcMain.handle('scene-clear', () => sceneQueue.clearFinished());
 ipcMain.handle('scene-start', () => {
+  if (stabilization.running) return { ok: false, error: 'Finish stabilization first' };
   if (encoder.running) return { ok: false, error: 'Finish Encoder before starting scene cuts' };
   if (!status.connected) return { ok: false, error: 'Resolve is not connected' };
   // Answer straight away: the queue itself can run for hours.
@@ -633,6 +658,7 @@ const ENC_ACTIONS = {
   stop: () => encoder.stop(),
 };
 ipcMain.handle('encoder', async (_e, { action, args }) => {
+  if (stabilization.running && action === 'start') return { ok: false, error: 'Finish stabilization first' };
   try {
     if (action === 'start') {
       if (!status.connected) return { ok: false, error: 'Connect to Resolve first' };
@@ -699,6 +725,7 @@ ipcMain.handle('import-series-names', async () => {
 });
 
 ipcMain.handle('create-series', async (_e, form) => {
+  if (stabilization.running) return { ok: false, error: 'Finish stabilization first' };
   if (!status.connected || !status.project) return { ok: false, error: 'Open the project in Resolve first' };
   const episodes = ep.planSeries(form);
   if (!episodes.length) return { ok: false, error: 'Add at least one episode' };
@@ -739,6 +766,7 @@ ipcMain.handle('list-series', async () => {
 ipcMain.handle('plan-rename', async (_e, { seriesInfo, form }) => ep.planRename(seriesInfo, form));
 
 ipcMain.handle('rename-series', async (_e, { seriesInfo, form }) => {
+  if (stabilization.running) return { ok: false, error: 'Finish stabilization first' };
   const items = ep.planRename(seriesInfo, form);
   const oldSet = Object.fromEntries(items.map((i) => [i.old, true]));
   const res = await bridge.renameSeries({ items, oldSet });
@@ -757,6 +785,7 @@ app.on('second-instance', () => {
   if (settings.launchResolve) launchResolve();
 });
 app.on('before-quit', e => {
+  if (stabilization.running) { e.preventDefault(); log('warn', 'Stop after the current clip and wait for stabilization before quitting'); showWindow(); return; }
   if (encoder.running) { e.preventDefault(); log('warn', 'Stop Encoder and wait for the current file and project cleanup before quitting'); showWindow(); return; }
   if (databaseBackup.running) { e.preventDefault(); log('warn', 'Wait for the library backup to finish before quitting'); showWindow(); return; }
   quitting = true; bridge.stop();

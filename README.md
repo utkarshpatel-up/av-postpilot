@@ -13,6 +13,7 @@ PCs need nothing extra installed: no Python.
 | **Auto-save** | Exports the open project as `.drp` every N minutes to several locations, only when it changed |
 | **Library Backup** | Monitors existing Mac/NAS database dumps; backs up whole PostgreSQL libraries, roles and optional secondary copies on the server |
 | **Scene Cuts** | Queue of timelines for *Detect Scene Cuts*, run one after another |
+| **Stabilization** | Stabilizes the clips you marked as shaky: picks fixed background points itself, tracks them in Fusion in a timeline copy, green/orange verdict |
 | **Episodes** | Creates episode series with a Text+ title; renames a series later (the `(…)` cue never changes) |
 | **Renders** | Copies each finished render, optional HD review pass (one temporary timeline, individual clips, cleaned up afterwards), shutdown with countdown |
 | **New Project** · **Episodes** · **Encoder** | Project folders / bins / Master-Edit timelines; episode series with plain or colour-bar titles; Media-Encoder-style queue with Resolve presets |
@@ -76,6 +77,29 @@ Each person subscribes to the appropriate topics in
 the ntfy phone app. Reuse the team topic on all editing PCs and add personal
 topics on the relevant PCs. Subscribing to both topics produces two notifications
 for an event sent to both. Existing single-topic settings are preserved on upgrade.
+
+## Stabilization
+Put a marker on each shaky clip in Resolve, choose the marker color (or **All
+colors**), click **Find marked clips**, then **Stabilize selected clips**.
+PostPilot saves the project and works in a duplicate of the timeline.
+
+For each clip it:
+1. reads 5 frames and keeps details that move exactly like the background
+   (chairs, rails, backdrops, banners) and spreads about 8 of them across the frame;
+   people are rejected because they move on their own;
+2. tracks all of them in one Fusion Tracker pass with classic point trackers
+   (IntelliTrack drifts slowly, so it is never used);
+3. keeps only the points that moved together (the camera shake) and applies
+   Match Move on their average.
+
+**Green / Passed:** 3 or more points agree and the expected leftover is at most
+0.5 px (4K pixels). **Orange / Needs review:** only 2 points agreed or the leftover
+is higher (applied, check it), or fewer than 2 (left unstabilized). For an orange
+clip, open **Choose points (optional)** and click a few rigid details yourself;
+they are tracked together with the automatic ones. About 3.5 minutes per
+600-frame 4K clip; no frames are exported for checking, no extra disk space.
+Clips that already have Fusion effects are skipped. Check frame edges in playback.
+Results are written to `stabilization-last-report.json` in the application data folder.
 
 ## Encoder (2.0.1)
 Encoder asks before saving and closing the current Resolve project, then uses a

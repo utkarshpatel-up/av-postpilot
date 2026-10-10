@@ -43,6 +43,28 @@
   </aside>
 
   <main>
+    <section class="page" id="page-stabilization">
+      <h1>Stabilization</h1>
+      <p class="lead">Mark the shaky clips in Resolve, find them here and stabilize. PostPilot picks fixed details itself and works in a copy of your timeline.</p>
+      <div class="card">
+        <div class="row"><label for="st-color">Marker color</label><select id="st-color"><option value="All">All colors</option></select><button class="btn" id="st-scan">Find marked clips</button></div>
+        <p class="muted small">A point marker selects its whole clip. Multiple markers on the same clip select it once. The top visible video clip is selected at each marker. Existing Fusion effects are kept for manual review.</p>
+        <div id="st-timeline" class="muted"></div>
+      </div>
+      <div class="card"><div class="card-label">Marked clips</div><div id="st-clips" class="muted">Open your timeline in Resolve, then find its marked clips.</div></div>
+      <div class="card hidden" id="st-review">
+        <div class="card-head"><div class="card-label" id="st-review-name">Choose points</div><button class="btn" id="st-preview">Refresh preview</button></div>
+        <p class="muted small">Optional. PostPilot already finds fixed details automatically. Add your own only if a clip comes back orange: click rigid chairs, rails, pillars or wall details (not people) on frame 0. Your points are tracked together with the automatic ones; any point that moves differently is ignored.</p>
+        <canvas id="st-canvas" width="768" height="432" aria-label="Clip preview: click a fixed anchor point"></canvas>
+        <div class="row"><label for="st-point-mode">Click preview to choose</label><select id="st-point-mode"><option value="anchor">Main point</option><option value="reference">Extra point</option></select><button class="btn" id="st-clear-references">Clear extra points</button><span id="st-reference-count" class="muted small">No extra points</span></div>
+        
+        <div class="row"><label for="st-frame">Preview frame</label><input id="st-frame" type="range" min="0" value="0"><span id="st-frame-label">0</span></div>
+        <div class="row"><label for="st-anchor-x">Anchor X (%)</label><input id="st-anchor-x" type="number" min="3" max="97" step="0.01"><label for="st-anchor-y">Y from top (%)</label><input id="st-anchor-y" type="number" min="3" max="97" step="0.01"></div>
+        <div class="row"><label for="st-pattern-width">Pattern width (%)</label><input id="st-pattern-width" type="number" min="0.5" max="15" step="0.1" value="4"><label for="st-pattern-height">Height (%)</label><input id="st-pattern-height" type="number" min="0.5" max="15" step="0.1" value="4.5"><span class="muted small">Keep the pattern on the fixed detail, clear of hands and upholstery.</span></div>
+        <label class="check hidden"><input id="st-reviewed" type="checkbox"> I checked the full clip; this point stays visible and fixed.</label>
+      </div>
+      <div class="card"><div class="row"><button class="btn primary" id="st-start">Stabilize selected clips</button><button class="btn" id="st-stop" disabled>Stop safely</button></div><p class="muted small">PostPilot saves the project and works in a timeline copy. For each clip it takes 3 frames to find fixed details, tracks about 8 of them in one Fusion pass (classic point trackers) and keeps only the points that move together, which is the camera shake. Green = Passed. Orange = needs a look (too few fixed points agreed). No frame-by-frame export. Check frame edges in playback.</p><div id="st-result" class="muted"></div></div>
+    </section>
     <!-- ================================================= Dashboard -->
     <section class="page active" id="page-dashboard">
       <h1>Dashboard</h1>
@@ -609,5 +631,8 @@
   <datalist id="series-names"></datalist>
   <div class="toast hidden" id="toast"></div>
   <script src="app.js"></script>
+  <script src="stabilization.js"></script>
 </body>
 </html>
+
+
