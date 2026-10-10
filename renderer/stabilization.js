@@ -40,7 +40,7 @@ function stClipRow(c, i) {
   const done = Boolean(c.copyTimelineId) && !st.running && ['Passed', 'Needs review', 'Stabilized (Resolve)'].includes(c.status);
   const usable = done && !/Left unstabilized|No details|No fixed/.test(c.reason || '');
   const actions = c.copyTimelineId && !running
-    ? `<div class="st-actions"><button class="btn" data-st-go="${esc(c.key)}" data-where="copy" title="Jump to this clip in the stabilized copy">▶ Review</button><button class="btn" data-st-go="${esc(c.key)}" data-where="original" title="Same clip in your original timeline">⇄ Original</button>${c.approved && c.method === 'resolve' ? '' : c.approved ? `<button class="btn" data-st-undo="${esc(c.key)}" title="Remove the stabilization from your timeline again">↺ Undo</button>` : usable ? `<button class="btn primary" data-st-approve="${esc(c.key)}" title="Apply this stabilization to the clip in your timeline">✔ Approve</button>` : ''}</div>`
+    ? `<div class="st-actions"><button class="btn" data-st-go="${esc(c.key)}" data-where="copy" title="Jump to this clip in the stabilized copy" ${c.copyDeleted ? 'disabled' : ''}>▶ Review</button><button class="btn" data-st-go="${esc(c.key)}" data-where="original" title="Same clip in your original timeline">⇄ Original</button>${c.approved && c.method === 'resolve' ? '' : c.approved ? `<button class="btn" data-st-undo="${esc(c.key)}" title="Remove the stabilization from your timeline again">↺ Undo</button>` : usable ? `<button class="btn primary" data-st-approve="${esc(c.key)}" title="Apply this stabilization to the clip in your timeline">✔ Approve</button>` : ''}</div>`
     : `<button class="btn" data-st-review="${esc(c.key)}" ${st.running || st.hasCopy || c.fusion ? 'disabled' : ''}>Choose points (optional)</button>`;
   const status = c.approved ? '✔ Applied to your timeline' : c.status;
   const motion = !c.copyTimelineId && !c.fusion ? `<label class="check inline small st-motion" title="Rare: the operator pans or reframes on purpose. Then only the fast shake is removed and the camera move is kept."><input type="checkbox" data-st-motion="${esc(c.key)}" ${c.motion ? 'checked' : ''} ${st.running ? 'disabled' : ''}> Camera moves on purpose (smooth only)</label>` : c.motion ? '<span class="muted small">Smooth: camera move kept</span>' : '';
@@ -63,6 +63,8 @@ function stLive() {
   }
   const approvable = st.clips.filter(c => c.copyTimelineId && !c.approved && ['Passed', 'Stabilized (Resolve)'].includes(c.status) && !/Left unstabilized/.test(c.reason || ''));
   $('st-approve-all').disabled = st.running || !approvable.length;
+  $('st-delete-copies').disabled = st.running || !st.copiesReady;
+  $('st-delete-copies').textContent = st.copiesReady ? `🗑 Delete stabilized cop${st.copiesReady > 1 ? 'ies' : 'y'} (${st.copiesReady})` : '🗑 Delete stabilized copies';
   $('st-approve-all').textContent = approvable.length ? `✔ Approve all passed (${approvable.length})` : '✔ Approve all passed';
 }
 setInterval(() => { if (st.running) { stLive(); const row = document.querySelector('.st-running'); if (row) stRender(); } }, 1000);
@@ -136,3 +138,9 @@ $('st-remove-markers').addEventListener('change', e => save(s => { s.stab.remove
 $('st-after').addEventListener('change', e => save(s => { s.stab.afterQueue = e.target.value; }));
 pilot.onSettings?.(s => { $('st-remove-markers').checked = Boolean(s.stab?.removeMarkers); $('st-after').value = s.stab?.afterQueue || 'nothing'; });
 pilot.getInitial().then(init => { $('st-remove-markers').checked = Boolean(init.settings.stab?.removeMarkers); $('st-after').value = init.settings.stab?.afterQueue || 'nothing'; });
+
+$('st-delete-copies').addEventListener('click', async () => {
+  if (!confirm('Delete the stabilized copy timeline(s)? Every stabilized clip is already applied to your own timeline.')) return;
+  const r = await stDo(pilot.stabilize('deletecopies'));
+  if (r) toast(`Deleted ${r.deleted} copy timeline(s)`);
+});

@@ -259,6 +259,14 @@ function setSecret(kind, value) {
 
 // ------------------------------------------------------------------ notifications, renders, scene cuts
 const notifier = new Notifier({ getSettings: () => settings, getSecret, log, pc: os.hostname() });
+// Per-module "Do nothing" (Scene Cuts, Renders, Encoder, Stabilization): that module's
+// messages are not sent at all. Failures (renderFailed) and shutdown warnings still are.
+const MODULE_EVENTS = { scene: ['sceneDone', 'sceneQueueDone'], renders: ['renderDone', 'queueDone', 'renderCopied'], encoder: ['encoderGroupDone', 'encoderQueueDone'], stab: ['stabQueueDone'] };
+const sendNotice = notifier.notify.bind(notifier);
+notifier.notify = (event, ...rest) => {
+  for (const [group, events] of Object.entries(MODULE_EVENTS)) if (events.includes(event) && settings[group]?.afterQueue === 'silent') return 0;
+  return sendNotice(event, ...rest);
+};
 
 // Shut down with a countdown the user can cancel from the app or the tray.
 let shutdownAt = null;
@@ -576,6 +584,7 @@ ipcMain.handle('stabilize', async (_e, args) => {
     if (args.action === 'review') return await stabilization.review(args.key, args.where);
     if (args.action === 'approve') return await stabilization.approve(args.keys || [], { removeMarkers: Boolean(args.removeMarkers), file: path.join(DATA, 'stabilization-apply.comp') });
     if (args.action === 'undo') return await stabilization.undo(args.key);
+    if (args.action === 'deletecopies') return await stabilization.deleteCopies();
     if (stabilization.running) return { ok: false, error: 'Wait for tracking to finish' };
     if (args.action === 'preview') {
       const file = path.join(DATA, 'stabilization-preview.png');

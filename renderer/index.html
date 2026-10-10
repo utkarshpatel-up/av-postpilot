@@ -66,9 +66,9 @@
         <div class="row"><label for="st-pattern-width">Pattern width (%)</label><input id="st-pattern-width" type="number" min="0.5" max="15" step="0.1" value="4"><label for="st-pattern-height">Height (%)</label><input id="st-pattern-height" type="number" min="0.5" max="15" step="0.1" value="4.5"><span class="muted small">Keep the pattern on the fixed detail, clear of hands and upholstery.</span></div>
         <label class="check hidden"><input id="st-reviewed" type="checkbox"> I checked the full clip; this point stays visible and fixed.</label>
       </div>
-      <div class="card"><div class="row"><button class="btn primary" id="st-start">Stabilize selected clips</button><button class="btn" id="st-stop" disabled>Stop safely</button><button class="btn" id="st-approve-all" disabled>✔ Approve all passed</button></div>
+      <div class="card"><div class="row"><button class="btn primary" id="st-start">Stabilize selected clips</button><button class="btn" id="st-stop" disabled>Stop safely</button><button class="btn" id="st-approve-all" disabled>✔ Approve all passed</button><button class="btn" id="st-delete-copies" disabled title="Available once every stabilized clip is approved">🗑 Delete stabilized copies</button></div>
         <div class="row"><label class="check inline"><input type="checkbox" id="st-remove-markers"> Remove the markers from my timeline when a clip is approved</label></div>
-        <div class="row"><label for="st-after">When the queue finishes</label><select id="st-after"><option value="nothing">Just notify</option><option value="shutdown">Notify and shut down this PC</option></select>
+        <div class="row"><label for="st-after">When the queue finishes</label><select id="st-after"><option value="silent">Do nothing</option><option value="nothing">Just notify</option><option value="shutdown">Notify and shut down this PC</option></select>
           <span class="countdown" data-for="stab">after <input type="number" class="cd-min" min="0" max="1440"> min <input type="number" class="cd-sec" min="0" max="59"> s</span></div>
         <p class="muted small">After the run: <b>▶ Review</b> jumps Resolve to the clip in the stabilized copy, <b>⇄ Original</b> to the same clip in your timeline. <b>✔ Approve</b> copies the stabilization onto your clip (your edit, grade and audio stay as they are) and gives it back its own colour; <b>↺ Undo</b> takes it off again.</p><p class="muted small">PostPilot saves the project and works in a timeline copy. For each clip it reads 5 frames to pick details, tracks about 8 of them in one Fusion pass (classic point trackers) and uses only the movement they agree on. <b>Lock</b> (still camera): the picture is pinned to the background. <b>Smooth</b> (operator reframes): slow camera moves are kept and only the fast shake is removed. The smallest zoom that hides black edges is added (max 1.03). Green = Passed. Orange = needs a look. No frame-by-frame export.</p><div id="st-result" class="muted"></div></div>
     </section>
@@ -333,7 +333,7 @@
         <div class="row">
           <label for="s-after">When the queue finishes</label>
           <select id="s-after">
-            <option value="nothing">Just notify</option>
+            <option value="silent">Do nothing</option><option value="nothing">Just notify</option>
             <option value="shutdown">Notify and shut down this PC</option>
           </select>
           <span class="countdown" data-for="scene">after
@@ -401,7 +401,7 @@
         <div class="row">
           <label for="rn-after">Then</label>
           <select id="rn-after">
-            <option value="nothing">Just notify</option>
+            <option value="silent">Do nothing</option><option value="nothing">Just notify</option>
             <option value="shutdown">Notify and shut down this PC</option>
           </select>
           <span class="countdown" data-for="renders">after
@@ -438,7 +438,7 @@
         <div class="row">
           <label for="enc-after">When the queue finishes</label>
           <select id="enc-after">
-            <option value="nothing">Just notify</option>
+            <option value="silent">Do nothing</option><option value="nothing">Just notify</option>
             <option value="shutdown">Notify and shut down this PC</option>
           </select>
           <span class="countdown" data-for="encoder">after

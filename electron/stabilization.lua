@@ -137,6 +137,16 @@ return function(connect, array)
       r:OpenPage('edit');seek(tl,ref.start);r:OpenPage('color');local ok=it:Stabilize();r:OpenPage('edit')
       assert(ok,"Resolve's stabilizer could not analyse this clip")
       it:SetClipColor('Yellow');r:GetProjectManager():SaveProject();return {ok=true}
+    elseif a.action=='deletecopies' then
+      -- Remove PostPilot's own stabilized copies (only names it created), after approval.
+      local r=assert(connect());local p=assert(r:GetProjectManager():GetCurrentProject(),'Open a project')
+      local doomed,cur={},p:GetCurrentTimeline()
+      for _,id in ipairs(a.ids or {}) do local tl=findTimeline(p,id)
+        if tl then assert(tl:GetName():match(' %- PostPilot Stabilized %d%d%d%d%d%d$'),'Not a PostPilot copy: '..tl:GetName());doomed[#doomed+1]=tl end end
+      if #doomed==0 then return {ok=true,deleted=0} end
+      for _,tl in ipairs(doomed) do if cur and cur:GetUniqueId()==tl:GetUniqueId() then local back=findTimeline(p,a.back);if back then p:SetCurrentTimeline(back) end end end
+      assert(p:GetMediaPool():DeleteTimelines(doomed),'Resolve could not delete the copy timelines')
+      r:GetProjectManager():SaveProject();return {ok=true,deleted=#doomed}
     elseif a.action=='goto' then
       -- Jump Resolve to a clip: the stabilized copy or your original timeline.
       local r=assert(connect());local p=assert(r:GetProjectManager():GetCurrentProject(),'Open a project')

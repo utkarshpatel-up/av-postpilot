@@ -9,7 +9,7 @@ class Stabilization {
     Object.assign(this, { bridge, log, onChange, grab, saveReport, wait });
     this.running = false; this.stopping = false; this.clips = []; this.timeline = ''; this.color = 'All'; this.luaTimeline = null;
   }
-  summary() { return { running: this.running, stopping: this.stopping, hasCopy: Boolean(this.hasCopy), clips: this.clips, timeline: this.timeline, startedAt: this.startedAt, finishedAt: this.finishedAt, current: this.current }; }
+  summary() { return { copiesReady: this.copiesReady().length, running: this.running, stopping: this.stopping, hasCopy: Boolean(this.hasCopy), clips: this.clips, timeline: this.timeline, startedAt: this.startedAt, finishedAt: this.finishedAt, current: this.current }; }
   changed() { this.onChange(this.summary()); }
   async request(args) { const r = await this.bridge.stabilize(args); if (!r.ok) throw Error(r.error); return r; }
   async timelines() { return this.request({ action: 'list' }); }
@@ -126,6 +126,7 @@ class Stabilization {
   async review(key, where = 'copy') {
     const c = this.clipFor(key);
     if (where === 'copy' && !c.copyTimelineId) throw Error('Not stabilized yet');
+    if (where === 'copy' && c.copyDeleted) throw Error('The stabilized copy was deleted');
     return this.request({ action: 'goto', timeline: where === 'copy' ? c.copyTimelineId : c.timelineId, start: c.start, frames: c.frames });
   }
   canApprove(c) { return Boolean(c.copyTimelineId) && ['Passed', 'Needs review', 'Stabilized (Resolve)'].includes(c.status) && !/Left unstabilized|No details|No fixed|^Not started/.test(c.reason || ''); }
@@ -145,6 +146,21 @@ class Stabilization {
     }
     if (done.length) this.log('info', 'Stabilization applied to ' + done.length + ' clip(s) in your timeline' + (removeMarkers ? '; markers removed' : ''));
     return { ok: !failed.length, applied: done.length, error: failed.join('; ') };
+  }
+  // A copy may go once every clip in it that has something to apply was approved.
+  copiesReady() {
+    const ids = [...new Set(this.clips.filter(c => c.copyTimelineId && !c.copyDeleted).map(c => c.copyTimelineId))];
+    return ids.filter(id => this.clips.filter(c => c.copyTimelineId === id && this.canApprove(c)).every(c => c.approved));
+  }
+  async deleteCopies() {
+    if (this.running) throw Error('Wait for stabilization to finish');
+    const ids = this.copiesReady();
+    if (!ids.length) throw Error('Approve every stabilized clip first');
+    const back = this.clips.find(c => ids.includes(c.copyTimelineId)).timelineId;
+    const r = await this.request({ action: 'deletecopies', ids, back });
+    for (const c of this.clips) if (ids.includes(c.copyTimelineId)) c.copyDeleted = true;
+    this.changed(); this.log('info', `Deleted ${r.deleted} stabilized copy timeline(s) after approval`);
+    return { ok: true, deleted: r.deleted };
   }
   async undo(key) {
     if (this.running) throw Error('Wait for stabilization to finish');
