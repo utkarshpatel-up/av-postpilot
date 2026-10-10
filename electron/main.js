@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, shell, nativeImage, safeStorage, Notification, net } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, shell, nativeImage, safeStorage, Notification, net, screen, globalShortcut } = require('electron');
 const { execFile, spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
@@ -41,6 +41,8 @@ const DEFAULTS = {
   resolvePath: process.platform === 'darwin' ? '/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/MacOS/Resolve' : 'C:\\Program Files\\Blackmagic Design\\DaVinci Resolve\\Resolve.exe',
   launchResolve: process.platform !== 'darwin',
   startHidden: false,
+  clipInfo: false,
+  clipInfoKey: 'Control+Alt+I',
   autosave: {
     enabled: true,
     intervalMin: 15,
@@ -58,6 +60,7 @@ const DEFAULTS = {
   scene: { afterQueue: 'nothing', shutdownSeconds: 60 },
   manual: { shutdownSeconds: 60 },
   encoder: { afterQueue: 'nothing', shutdownSeconds: 60 },
+  stab: { afterQueue: 'nothing', shutdownSeconds: 60, removeMarkers: false },
   libraryBackup: libraryBackup.DEFAULTS,
   notify: {
     telegram: { enabled: false, chats: [] },
@@ -66,7 +69,7 @@ const DEFAULTS = {
     email: { enabled: false, user: '', recipients: [] },
     events: {
       renderDone: true, renderFailed: true, renderCopied: false, queueDone: true,
-      sceneDone: true, sceneQueueDone: true, encoderGroupDone: true, encoderQueueDone: true, shutdown: true, autosaveFailed: true, projectCreated: false,
+      sceneDone: true, sceneQueueDone: true, encoderGroupDone: true, encoderQueueDone: true, stabQueueDone: true, shutdown: true, autosaveFailed: true, projectCreated: false,
       libraryBackupDone: false, libraryBackupFailed: true, libraryAlert: true, libraryBackupOverdue: true,
     },
   },
@@ -95,6 +98,7 @@ function mergeSettings(s) {
     project: { ...DEFAULTS.project, ...(s.project?.move === false ? { footage: 'copy' } : {}), ...(s.project || {}) },
     series: { ...DEFAULTS.series, ...(s.series || {}) },
     encoder: { ...DEFAULTS.encoder, ...(s.encoder || {}) },
+    stab: { ...DEFAULTS.stab, ...(s.stab || {}) },
     libraryBackup: { ...DEFAULTS.libraryBackup, ...(s.libraryBackup || {}) },
     manual: { ...DEFAULTS.manual, ...(s.shutdownSeconds ? { shutdownSeconds: s.shutdownSeconds } : {}), ...(s.manual || {}) },
     renders: { ...DEFAULTS.renders, ...(s.shutdownSeconds ? { shutdownSeconds: s.shutdownSeconds } : {}), ...(s.renders || {}), hd: { ...DEFAULTS.renders.hd, ...(s.renders?.hd || {}) } },
@@ -292,7 +296,7 @@ function cancelShutdown() {
 function sendShutdown() { send('shutdown', { at: shutdownAt, reason: shutdownReason }); }
 function afterQueue(action, what) {
   if (action !== 'shutdown') return;
-  const group = { 'scene cut queue': 'scene', 'encoder queue': 'encoder' }[what] || 'renders';
+  const group = { 'scene cut queue': 'scene', 'encoder queue': 'encoder', 'stabilization queue': 'stab' }[what] || 'renders';
   const secs = countdown(settings[group].shutdownSeconds);
   scheduleShutdown(`${what} finished`, secs);
 }
@@ -414,6 +418,53 @@ function showWindow() {
   win.focus();
 }
 
+// Small always-on-top window with details of the clip under Resolve's playhead.
+let clipWin = null, clipTimer = null, clipBusy = false;
+// System-wide shortcut, so it also works while Resolve has focus.
+let clipKey = '';
+function registerClipKey() {
+  if (clipKey === settings.clipInfoKey) return;
+  if (clipKey) globalShortcut.unregister(clipKey);
+  clipKey = settings.clipInfoKey || '';
+  if (!clipKey) return;
+  let ok = false;
+  try { ok = globalShortcut.register(clipKey, () => applySettings({ ...settings, clipInfo: !settings.clipInfo })); } catch { ok = false; }
+  if (!ok) { log('warn', `Clip Info shortcut ${clipKey} is not available (used by another app); choose another in Settings`); clipKey = ''; }
+}
+function syncClipInfo() {
+  const open = clipWin && !clipWin.isDestroyed();
+  if (settings.clipInfo && !open) openClipInfo();
+  if (!settings.clipInfo && open) clipWin.close();
+}
+function openClipInfo() {
+  const { workArea } = screen.getPrimaryDisplay();
+  clipWin = new BrowserWindow({
+    width: 320, height: 300, x: workArea.x + workArea.width - 340, y: workArea.y + workArea.height - 320,
+    alwaysOnTop: true, frame: false, resizable: true, skipTaskbar: true, backgroundColor: '#16181d', title: 'Clip Info',
+    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false },
+  });
+  clipWin.setAlwaysOnTop(true, 'floating');
+  clipWin.loadFile(path.join(__dirname, '..', 'renderer', 'clipinfo.html'));
+  clipTimer = setInterval(async () => {
+    if (clipBusy || !clipWin || clipWin.isDestroyed()) return;
+    clipBusy = true;
+    try { const info = await bridge.clipInfo(); if (clipWin && !clipWin.isDestroyed()) clipWin.webContents.send('clipinfo', info); }
+    catch (err) { if (clipWin && !clipWin.isDestroyed()) clipWin.webContents.send('clipinfo', { ok: false, error: err.message }); }
+    finally { clipBusy = false; }
+  }, 700);
+  clipWin.on('closed', () => { clearInterval(clipTimer); clipWin = null; updateTray(); });
+  // Developer check: AVPP_CLIPSHOT=<file.png> saves a picture of the window.
+  if (process.env.AVPP_CLIPSHOT) setTimeout(async () => { log('info', `clip window visible=${clipWin.isVisible()} bounds=${JSON.stringify(clipWin.getBounds())}`); fs.writeFileSync(process.env.AVPP_CLIPSHOT, (await clipWin.webContents.capturePage()).toPNG()); }, 6000);
+  updateTray();
+}
+ipcMain.handle('clipinfo-toggle', () => applySettings({ ...settings, clipInfo: !settings.clipInfo }));
+// The window grows upwards when '+ more' is opened, so it stays in its corner.
+ipcMain.handle('clipinfo-height', (_e, height) => {
+  if (!clipWin || clipWin.isDestroyed()) return;
+  const b = clipWin.getBounds(), h = Math.max(120, Math.min(900, Math.round(height)));
+  clipWin.setBounds({ x: b.x, y: b.y + b.height - h, width: b.width, height: h });
+});
+
 function updateTray() {
   if (!tray) return;
   const a = settings.autosave;
@@ -421,6 +472,7 @@ function updateTray() {
   tray.setToolTip(`AV PostPilot\n${status.connected ? `Resolve: ${proj}` : 'Resolve not connected'}\nAuto-save ${a.enabled ? 'on' : 'off'}`);
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open AV PostPilot', click: showWindow },
+    { label: 'Clip Info window', type: 'checkbox', checked: settings.clipInfo, click: (item) => applySettings({ ...settings, clipInfo: item.checked }) },
     { type: 'separator' },
     { label: 'Save .drp now', enabled: status.connected && !autosaver.running, click: () => autosaver.run('manual') },
     { label: 'Auto-save', type: 'checkbox', checked: a.enabled, click: (item) => applySettings({ ...settings, autosave: { ...a, enabled: item.checked } }) },
@@ -447,6 +499,8 @@ function applySettings(next) {
     autosaver.schedule();
   }
   send('settings', settings);
+  syncClipInfo();
+  registerClipKey();
   updateTray();
   return settings;
 }
@@ -462,6 +516,16 @@ ipcMain.handle('library-backup', async (_e, action, options = {}) => {
     if (action === 'status') return { ...libraryBackup.monitor(settings.libraryBackup), running: databaseBackup.running };
     if (action === 'check') return { ok: true, libraries: await databaseBackup.check() };
     if (action === 'run') return await databaseBackup.run();
+    if (['schedule-start', 'schedule-stop', 'schedule-status'].includes(action)) {
+      const what = action.slice(9);
+      if (what !== 'status') {
+        if (!app.isPackaged) throw new Error('Scheduled backups need the installed app (it runs PostPilot itself at each time)');
+        if (what === 'start') libraryBackup.validate(settings.libraryBackup);
+      }
+      const r = libraryBackup.schedule(what, settings.libraryBackup, process.execPath, DATA);
+      if (what !== 'status') log('info', r.scheduled ? `Library backups scheduled daily at ${settings.libraryBackup.times}` : 'Scheduled library backups stopped');
+      return { ok: true, ...r, times: settings.libraryBackup.times };
+    }
     if (action === 'schedule') {
       if (process.platform === 'darwin' && app.isPackaged) {
         libraryBackup.validate(settings.libraryBackup);
@@ -497,12 +561,25 @@ ipcMain.handle('stabilize', async (_e, args) => {
     if (args.action === 'summary') return { ok: true, ...stabilization.summary() };
     if (args.action === 'stop') return stabilization.stop();
     if (encoder.running || sceneQueue.running || autosaver.running || shutdownAt) return { ok: false, error: 'Finish the current operation and cancel any planned shutdown first' };
-    if (args.action === 'scan') return await stabilization.scan(args.color);
-    if (args.action === 'start') return await stabilization.start(args.keys || [], args.anchors || []);
+    if (args.action === 'timelines') return await stabilization.timelines();
+    if (args.action === 'scan') return await stabilization.scan(args.color, args.timelines || []);
+    if (args.action === 'start') {
+      let result;
+      try { result = await stabilization.start(args.keys || [], args.anchors || [], args.moving || []); }
+      catch (err) { notifier.notify('stabQueueDone', `🎥 Stabilization stopped on ${os.hostname()}: ${err.message}`); throw err; }
+      const run = stabilization.clips.filter(c => (args.keys || []).includes(c.key));
+      const passed = run.filter(c => c.status === 'Passed').length, review = run.filter(c => c.status === 'Needs review').length; const viaResolve = run.filter(c => c.status === 'Stabilized (Resolve)').length;
+      notifier.notify('stabQueueDone', `🎥 Stabilization finished on ${os.hostname()}: ${passed}/${run.length} passed${viaResolve ? `, ${viaResolve} via Resolve's stabilizer` : ''}${review ? `, ${review} need review` : ''} in ${mmss(Math.round((stabilization.finishedAt - stabilization.startedAt) / 1000))}.`);
+      afterQueue(settings.stab.afterQueue, 'stabilization queue');
+      return result;
+    }
+    if (args.action === 'review') return await stabilization.review(args.key, args.where);
+    if (args.action === 'approve') return await stabilization.approve(args.keys || [], { removeMarkers: Boolean(args.removeMarkers), file: path.join(DATA, 'stabilization-apply.comp') });
+    if (args.action === 'undo') return await stabilization.undo(args.key);
     if (stabilization.running) return { ok: false, error: 'Wait for tracking to finish' };
     if (args.action === 'preview') {
       const file = path.join(DATA, 'stabilization-preview.png');
-      const result = await bridge.stabilize({ action: 'preview', key: args.key, frame: args.frame, file });
+      const result = await stabilization.preview(args.key, args.frame, file);
       if (result.ok) return { ok: true, frame: result.frame, image: nativeImage.createFromPath(file).resize({ width: 1280 }).toDataURL() };
       return result;
     }
@@ -805,6 +882,9 @@ app.whenReady().then(async () => {
   setInterval(checkLibraryAge, 5 * 60 * 1000);
   await poll();
   setInterval(poll, 3000);
+  if (process.env.AVPP_CLIPINFO) settings.clipInfo = true;
+  syncClipInfo();
+  registerClipKey();
 
   // Developer check: AVPP_SCREENSHOT=<folder> saves a picture of every page.
   if (process.env.AVPP_SCREENSHOT) {

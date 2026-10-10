@@ -261,4 +261,29 @@ function windowsHealthSchedule(exe, data, unattended = false) {
   const name = `AVPostPilot-LibraryHealth-${crypto.createHash('sha256').update(data).digest('hex').slice(0, 8)}`;
   return `\n# Independent hourly overdue-backup check; shares notification settings.\n$healthAction = New-ScheduledTaskAction -Execute ${q(exe)} -Argument ${q(`--library-backup-check --backup-user-data="${data}"`)}\n$healthTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Hours 1)\nRegister-ScheduledTask -TaskName ${q(name)} -Action $healthAction -Trigger $healthTrigger -Settings $settings ${unattended ? '-User $credential.UserName -Password $credential.GetNetworkCredential().Password' : '-Principal $principal'} -Force\nWrite-Host 'Hourly library health check installed.'\n`;
 }
-module.exports = { DEFAULTS, LibraryBackup, monitor, validate, times, prune, windowsSchedule, windowsHealthSchedule, macSchedule, ownedRoot };
+// Installs/removes the schedule directly (launchd on Mac, Task Scheduler on Windows),
+// so the editor only presses Start/Stop. Runs even while PostPilot is closed.
+function taskNames(data) { const h = crypto.createHash('sha256').update(data).digest('hex').slice(0, 8); return [`AVPostPilot-LibraryBackup-${h}`, `AVPostPilot-LibraryHealth-${h}`]; }
+function schedule(action, s, exe, data, { platform = process.platform, run = require('child_process').execFileSync, home = require('os').homedir(), uid = process.getuid?.() } = {}) {
+  if (platform === 'darwin') {
+    const src = macSchedule(s, exe, data), dir = path.join(home, 'Library', 'LaunchAgents');
+    const jobs = [[src.label, src.plist], [src.healthLabel, src.healthPlist]];
+    if (action === 'status') return { scheduled: jobs.every(([label]) => { try { run('launchctl', ['print', `gui/${uid}/${label}`], { stdio: 'ignore' }); return true; } catch { return false; } }) };
+    for (const [label, plist] of jobs) {
+      const dest = path.join(dir, `${label}.plist`);
+      try { run('launchctl', ['bootout', `gui/${uid}/${label}`], { stdio: 'ignore' }); } catch { /* not loaded */ }
+      if (action === 'stop') { fs.rmSync(dest, { force: true }); continue; }
+      fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(dest, plist, { mode: 0o600 });
+      run('launchctl', ['enable', `gui/${uid}/${label}`]); run('launchctl', ['bootstrap', `gui/${uid}`, dest]);
+    }
+    return { scheduled: action === 'start' };
+  }
+  if (platform !== 'win32') throw new Error('Scheduling is supported on Mac and Windows');
+  const ps = script => run('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const names = taskNames(data);
+  if (action === 'status') { try { ps(names.map(n => `Get-ScheduledTask -TaskName '${n}' -ErrorAction Stop | Out-Null`).join('; ')); return { scheduled: true }; } catch { return { scheduled: false }; } }
+  if (action === 'stop') { ps(names.map(n => `Unregister-ScheduledTask -TaskName '${n}' -Confirm:$false -ErrorAction SilentlyContinue`).join('; ')); return { scheduled: false }; }
+  ps(windowsSchedule(s, exe, data, false) + windowsHealthSchedule(exe, data, false));
+  return { scheduled: true };
+}
+module.exports = { DEFAULTS, LibraryBackup, monitor, validate, times, prune, windowsSchedule, windowsHealthSchedule, macSchedule, ownedRoot, schedule, taskNames };

@@ -47,10 +47,13 @@
       <h1>Stabilization</h1>
       <p class="lead">Mark the shaky clips in Resolve, find them here and stabilize. PostPilot picks fixed details itself and works in a copy of your timeline.</p>
       <div class="card">
+        <div class="row"><label>Timelines</label><button class="btn" id="st-tl-refresh">Refresh list</button><button class="btn" id="st-tl-all">Select all with markers</button><span class="muted small">Tick every timeline that has shaky clips; they run one after another.</span></div>
+        <div id="st-timelines" class="st-tl-list muted small">Open a project in Resolve, then refresh.</div>
         <div class="row"><label for="st-color">Marker color</label><select id="st-color"><option value="All">All colors</option></select><button class="btn" id="st-scan">Find marked clips</button></div>
         <p class="muted small">A point marker selects its whole clip. Multiple markers on the same clip select it once. The top visible video clip is selected at each marker. Existing Fusion effects are kept for manual review.</p>
         <div id="st-timeline" class="muted"></div>
       </div>
+      <div class="card hidden" id="st-live"><div class="st-progress"><div id="st-live-bar"></div></div><div id="st-live-text" class="small"></div></div>
       <div class="card"><div class="card-label">Marked clips</div><div id="st-clips" class="muted">Open your timeline in Resolve, then find its marked clips.</div></div>
       <div class="card hidden" id="st-review">
         <div class="card-head"><div class="card-label" id="st-review-name">Choose points</div><button class="btn" id="st-preview">Refresh preview</button></div>
@@ -63,7 +66,11 @@
         <div class="row"><label for="st-pattern-width">Pattern width (%)</label><input id="st-pattern-width" type="number" min="0.5" max="15" step="0.1" value="4"><label for="st-pattern-height">Height (%)</label><input id="st-pattern-height" type="number" min="0.5" max="15" step="0.1" value="4.5"><span class="muted small">Keep the pattern on the fixed detail, clear of hands and upholstery.</span></div>
         <label class="check hidden"><input id="st-reviewed" type="checkbox"> I checked the full clip; this point stays visible and fixed.</label>
       </div>
-      <div class="card"><div class="row"><button class="btn primary" id="st-start">Stabilize selected clips</button><button class="btn" id="st-stop" disabled>Stop safely</button></div><p class="muted small">PostPilot saves the project and works in a timeline copy. For each clip it takes 3 frames to find fixed details, tracks about 8 of them in one Fusion pass (classic point trackers) and keeps only the points that move together, which is the camera shake. Green = Passed. Orange = needs a look (too few fixed points agreed). No frame-by-frame export. Check frame edges in playback.</p><div id="st-result" class="muted"></div></div>
+      <div class="card"><div class="row"><button class="btn primary" id="st-start">Stabilize selected clips</button><button class="btn" id="st-stop" disabled>Stop safely</button><button class="btn" id="st-approve-all" disabled>✔ Approve all passed</button></div>
+        <div class="row"><label class="check inline"><input type="checkbox" id="st-remove-markers"> Remove the markers from my timeline when a clip is approved</label></div>
+        <div class="row"><label for="st-after">When the queue finishes</label><select id="st-after"><option value="nothing">Just notify</option><option value="shutdown">Notify and shut down this PC</option></select>
+          <span class="countdown" data-for="stab">after <input type="number" class="cd-min" min="0" max="1440"> min <input type="number" class="cd-sec" min="0" max="59"> s</span></div>
+        <p class="muted small">After the run: <b>▶ Review</b> jumps Resolve to the clip in the stabilized copy, <b>⇄ Original</b> to the same clip in your timeline. <b>✔ Approve</b> copies the stabilization onto your clip (your edit, grade and audio stay as they are) and gives it back its own colour; <b>↺ Undo</b> takes it off again.</p><p class="muted small">PostPilot saves the project and works in a timeline copy. For each clip it reads 5 frames to pick details, tracks about 8 of them in one Fusion pass (classic point trackers) and uses only the movement they agree on. <b>Lock</b> (still camera): the picture is pinned to the background. <b>Smooth</b> (operator reframes): slow camera moves are kept and only the fast shake is removed. The smallest zoom that hides black edges is added (max 1.03). Green = Passed. Orange = needs a look. No frame-by-frame export.</p><div id="st-result" class="muted"></div></div>
     </section>
     <!-- ================================================= Dashboard -->
     <section class="page active" id="page-dashboard">
@@ -579,9 +586,13 @@
         <p class="muted small">The age limit marks old dumps as Stale. Enable Library backup is overdue in Notifications for phone/email alerts. Checks run every 5 minutes while PostPilot is open; exported schedules also include an hourly health check. Re-export and install schedule setup to check when the app is closed. One alert per overdue library until a fresh backup is seen.</p>
         <p class="muted small">New backups are placed in AV-PostPilot-Libraries inside the chosen folders. Retention only removes this engine's timestamped files; PROTECTED snapshots are never pruned. Archive-list checks do not replace a restore test.</p>
         <div class="row"><button class="btn" id="lb-check">Test connection &amp; list libraries</button><button class="btn primary" id="lb-run">Back up now</button></div>
+        <div class="row"><button class="btn primary" id="lb-sched-start">Start scheduled backups</button><button class="btn" id="lb-sched-stop">Stop</button><span id="lb-sched-state" class="muted small"></span></div>
+        <p class="muted small">Start installs the schedule on this computer for the daily times above (re-press after changing them). Backups then run even when PostPilot is closed; this user must stay logged in (a locked screen is fine).</p>
+        <details class="small"><summary>Advanced: export setup script instead</summary>
         <div class="row" id="lb-unattended-row"><label class="check inline"><input type="checkbox" id="lb-unattended"> Run even when this Windows user is logged out</label></div>
         <div class="row"><button class="btn" id="lb-schedule">Export Windows schedule setup</button></div>
         <p class="muted small" id="lb-schedule-help">Run the exported PowerShell setup script on the server. PostPilot can be closed when the task runs. Logged-out scheduling prompts for the same Windows account's password and may require IT permissions. Otherwise that user must stay logged in (locking the screen is fine). Use a UNC path for NAS access. Keep the app folder at the same path and re-export after changing times or moving the app.</p>
+        </details>
       </div>
       <div class="card">
         <div class="card-head"><div class="card-label">Backup health</div><button class="btn" id="lb-refresh">Refresh</button></div>
@@ -612,6 +623,8 @@
         </div>
         <label class="check"><input type="checkbox" id="s-launch"> Open Resolve when PostPilot starts</label>
         <label class="check"><input type="checkbox" id="s-hidden"> Start PostPilot hidden in the tray</label>
+        <label class="check"><input type="checkbox" id="s-clipinfo"> Show the Clip Info window (details of the clip under Resolve's playhead, stays on top)</label>
+        <div class="row"><label for="s-clipkey">Clip Info shortcut</label><input id="s-clipkey" readonly placeholder="Click, then press keys" style="width:180px"><button class="btn" id="s-clipkey-clear">Clear</button><span class="muted small">Works everywhere, also inside Resolve. Click the box and press a new combination.</span></div>
       </div>
       <div class="card">
         <div class="card-label">One-time Resolve setting (each PC)</div>

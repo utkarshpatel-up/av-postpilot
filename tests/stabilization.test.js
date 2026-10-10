@@ -37,35 +37,102 @@ test('pickPoints keeps details that stay in place and rejects ones that move', (
   assert.ok(pts.every(p => p.x < .5), JSON.stringify(pts));
 });
 
+const { edgeZoom } = require('../electron/stabilization-points');
+test('edge zoom covers the largest shift with a small margin and is capped', () => {
+  assert.deepEqual(edgeZoom({ x: .001, y: .003 }), { zoom: 1.008, capped: false });
+  assert.deepEqual(edgeZoom({ x: 0, y: 0 }), { zoom: 1.002, capped: false });
+  assert.deepEqual(edgeZoom({ x: .05, y: 0 }), { zoom: 1.03, capped: true });
+});
+
+// Two timelines, two marked clips each.
 function setup(paths) {
-  const calls = [];
-  const s = new Stabilization({ log() {}, onChange() {}, wait: async () => {},
-    grab: async () => [], bridge: { stabilize: async a => { calls.push(a);
-      if (a.action === 'begin') return { ok: true, timeline: 'copy' };
-      if (a.action === 'progress') return { ok: true, running: false, paths: paths(), width: 3840, height: 2160 };
-      return { ok: true }; } } });
-  s.clips = [{ key: '1:1', fusion: 0, frames: 200 }, { key: '1:2', fusion: 0, frames: 200 }];
+  const calls = [], clips = { A: [{ key: '1:1', start: 0, frames: 200, fusion: 0 }, { key: '1:2', start: 300, frames: 200, fusion: 0 }], B: [{ key: '1:5', start: 50, frames: 200, fusion: 0 }] };
+  const s = new Stabilization({ log() {}, onChange() {}, wait: async () => {}, grab: async () => [], bridge: { stabilize: async a => { calls.push(a);
+    if (a.action === 'scan') return { ok: true, colors: ['Blue'], clips: clips[a.timeline || 'A'], timeline: `TL ${a.timeline || 'A'}`, timelineId: a.timeline || 'A' };
+    if (a.action === 'begin') return { ok: true, timeline: 'copy', timelineId: 'copy-id' };
+    if (a.action === 'progress') return { ok: true, running: false, paths: paths(), width: 3840, height: 2160 };
+    return { ok: true }; } } });
   return { s, calls };
 }
-test('batch: copy once, track user + picked points, apply only agreeing trackers', async () => {
-  const { s, calls } = setup(() => [path(.2, .8), path(.4, .4, person), path(.7, .5), path(.8, .2)]);
-  s.grab = async () => []; // no auto points found -> only the user points are tracked
-  await s.start(['1:1'], [{ key: '1:1', x: .2, y: .8 }, { key: '1:1', x: .4, y: .4 }, { key: '1:1', x: .7, y: .5 }, { key: '1:1', x: .8, y: .2 }]);
-  assert.deepEqual(calls.map(a => a.action), ['begin', 'track', 'progress', 'apply', 'finish']);
-  assert.equal(calls[1].points.length, 4);
-  assert.deepEqual(calls[3].use, [1, 3, 4]);
-  assert.equal(calls[3].passed, true);
-  assert.equal(s.clips[0].status, 'Passed');
+const pts = key => [.2, .7, .8].map(v => ({ key, x: v, y: .5 }));
+test('scan collects clips from several timelines with unique keys', async () => {
+  const { s } = setup(() => []);
+  const r = await s.scan('Blue', ['A', 'B']);
+  assert.deepEqual(r.clips.map(c => c.key), ['A|1:1', 'A|1:2', 'B|1:5']);
+  assert.equal(r.clips[2].lkey, '1:5');
 });
-test('stop after the current clip skips the next one', async () => {
+test('queue: one copy per timeline, only agreeing trackers, edge zoom applied', async () => {
+  const { s, calls } = setup(() => [path(.2, .8), path(.4, .4, person), path(.7, .5), path(.8, .2)]);
+  await s.scan('Blue', ['A', 'B']);
+  await s.start(['A|1:1', 'B|1:5'], [...pts('A|1:1'), { key: 'A|1:1', x: .4, y: .4 }, ...pts('B|1:5'), { key: 'B|1:5', x: .4, y: .4 }]);
+  assert.deepEqual(calls.slice(2).map(a => a.action + (a.timeline ? ':' + a.timeline : '')), ['scan:A', 'begin', 'track', 'progress', 'apply', 'finish', 'scan:B', 'begin', 'track', 'progress', 'apply', 'finish']);
+  const apply = calls.find(a => a.action === 'apply');
+  assert.equal(apply.key, '1:1'); assert.deepEqual(apply.use, [1, 3, 4]); assert.ok(apply.zoom > 1 && apply.zoom < 1.01);
+  assert.equal(s.clips.find(c => c.key === 'A|1:1').status, 'Passed');
+});
+test('a timeline edited after the scan stops before tracking', async () => {
+  const { s, calls } = setup(() => []);
+  await s.scan('Blue', ['A']); s.clips[0].start = 999;
+  await assert.rejects(s.start(['A|1:1'], pts('A|1:1')), /changed since the scan/);
+  assert.equal(calls.filter(a => a.action === 'begin').length, 0);
+});
+test('stop after the current clip skips the rest', async () => {
   let s; const x = setup(() => { s.stop(); return [path(.2, .8), path(.7, .5), path(.8, .2)]; }); s = x.s;
-  await s.start(['1:1', '1:2'], [.2, .7, .8].map(v => ({ key: '1:1', x: v, y: .5 })).concat([.2, .7, .8].map(v => ({ key: '1:2', x: v, y: .5 }))));
+  await s.scan('Blue', ['A', 'B']);
+  await s.start(['A|1:1', 'A|1:2', 'B|1:5'], [...pts('A|1:1'), ...pts('A|1:2'), ...pts('B|1:5')]);
   assert.equal(x.calls.filter(a => a.action === 'track').length, 1);
-  assert.equal(s.clips[1].status, 'Not started');
+  assert.deepEqual(s.clips.map(c => c.status), ['Passed', 'Not started', 'Not started']);
 });
 test('existing Fusion clips and repeated batches are refused', async () => {
-  const { s, calls } = setup(() => []); s.clips[0].fusion = 1;
-  await assert.rejects(s.start(['1:1']), /Fusion/); assert.equal(calls.length, 0);
+  const { s, calls } = setup(() => []);
+  await s.scan('Blue', ['A']); s.clips[0].fusion = 1;
+  await assert.rejects(s.start(['A|1:1']), /Fusion/);
   s.clips[0].fusion = 0; s.hasCopy = true;
-  await assert.rejects(s.start(['1:1']), /Find marked clips/);
+  await assert.rejects(s.start(['A|1:1']), /Find marked clips/);
+  assert.equal(calls.filter(a => a.action === 'begin').length, 0);
+});
+
+const { analyze } = require('../electron/stabilization-points');
+test('a reframing camera gets Smooth: slow move kept, only the fast shake corrected', () => {
+  // slow pan of 200 px plus a 3 px shake, seen by 4 points; one person moves on their own
+  const pan = n => [n * 200 / 3840 / 300, 0];
+  const p = (x, y, own) => path(x, y, n => { const a = pan(n), o = own ? own(n) : [0, 0]; return [a[0] + o[0], a[1] + o[1]]; });
+  const c = analyze([p(.2, .8), p(.7, .5), p(.5, .3, n => [Math.sin(n / 9) * .01, 0]), p(.8, .2)], 3840, 2160, 25);
+  assert.equal(c.mode, 'smooth');
+  assert.ok(c.points >= 3 && c.weakFrames === 0, JSON.stringify({ points: c.points, weak: c.weakFrames }));
+  // correction cancels the shake (a few px), never the 200 px pan
+  const maxPx = Math.max(...c.correction.map(v => Math.abs(v[0]) * 3840));
+  assert.ok(maxPx < 4, `correction ${maxPx}px`);
+});
+test('a still camera keeps Lock mode', () => {
+  assert.equal(analyze([path(.2, .8), path(.7, .5), path(.8, .2)], 3840, 2160, 25).mode, 'lock');
+});
+test('approve sends the original clip position and colour; undo restores markers', async () => {
+  const { s, calls } = setup(() => [path(.2, .8), path(.7, .5), path(.8, .2)]);
+  await s.scan('Blue', ['A']);
+  s.clips[0].clipColor = 'Blue'; s.clips[0].markers = [{ frame: 5, color: 'Blue' }];
+  await s.start(['A|1:1'], pts('A|1:1'));
+  const r = await s.approve(['A|1:1', 'A|1:2'], { removeMarkers: true, file: 'x.comp' });
+  assert.equal(r.applied, 1); assert.match(r.error, /nothing to apply/);
+  const a = calls.find(c => c.action === 'approve');
+  assert.deepEqual([a.copy, a.timeline, a.track, a.index, a.color, a.removeMarkers], ['copy-id', 'A', undefined, undefined, 'Blue', true]);
+  await s.undo('A|1:1');
+  assert.equal(calls.find(c => c.action === 'undo').restoreMarkers, true);
+  assert.equal(s.clips[0].approved, false);
+});
+test('no rigid reference: Resolve stabilizer is used, without tracking', async () => {
+  const { s, calls } = setup(() => []);
+  await s.scan('Blue', ['A']);
+  await s.start(['A|1:1']); // no own points; grab returns no frames -> no fixed details
+  assert.deepEqual(calls.filter(a => ['track', 'resolvestab'].includes(a.action)).map(a => a.action), ['resolvestab']);
+  assert.equal(s.clips[0].status, 'Stabilized (Resolve)');
+  assert.equal(s.canApprove(s.clips[0]), true);
+});
+test('points that disagree after tracking also fall back to Resolve', async () => {
+  const wild = (x, y) => path(x, y, n => [Math.sin(n * x * 7) * .02, Math.cos(n * y * 5) * .02]);
+  const { s, calls } = setup(() => [wild(.2, .8), wild(.7, .5), wild(.4, .3), wild(.8, .2)]);
+  await s.scan('Blue', ['A']);
+  await s.start(['A|1:1'], pts('A|1:1'));
+  assert.ok(calls.some(a => a.action === 'resolvestab'));
+  assert.equal(calls.some(a => a.action === 'apply'), false);
 });

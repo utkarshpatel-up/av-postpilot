@@ -44,6 +44,7 @@ async function save(mutate) {
 function go(page) {
   document.querySelectorAll('.nav').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
   document.querySelectorAll('.page').forEach((p) => p.classList.toggle('active', p.id === `page-${page}`));
+  try { localStorage.setItem('last-page', page); } catch {}
   if (page === 'autosave') refreshDestChecks();
   if (page === 'newproject') renderNewProject();
   if (page === 'notify') renderNotify();
@@ -224,6 +225,8 @@ function renderSettingsForm() {
   $('s-resolve').value = settings.resolvePath;
   $('s-launch').checked = settings.launchResolve;
   $('s-hidden').checked = settings.startHidden;
+  $('s-clipinfo').checked = settings.clipInfo;
+  $('s-clipkey').value = (settings.clipInfoKey || '').replace('Control', 'Ctrl');
 }
 $('s-resolve').addEventListener('change', (e) => save((s) => { s.resolvePath = e.target.value.trim(); }));
 $('s-resolve-browse').addEventListener('click', async () => {
@@ -232,6 +235,16 @@ $('s-resolve-browse').addEventListener('click', async () => {
 });
 $('s-launch').addEventListener('change', (e) => save((s) => { s.launchResolve = e.target.checked; }));
 $('s-hidden').addEventListener('change', (e) => save((s) => { s.startHidden = e.target.checked; }));
+$('s-clipinfo').addEventListener('change', (e) => save((s) => { s.clipInfo = e.target.checked; }));
+$('s-clipkey').addEventListener('keydown', (e) => {
+  e.preventDefault();
+  if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
+  const key = e.key.length === 1 ? e.key.toUpperCase() : /^F\d+$/.test(e.key) ? e.key : '';
+  const mods = [e.ctrlKey && 'Control', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Command'].filter(Boolean);
+  if (!key || (!mods.length && !/^F\d+$/.test(key))) return toast('Use a modifier (Ctrl/Alt/Shift) with a letter, or an F-key', true);
+  save((s) => { s.clipInfoKey = [...mods, key].join('+'); });
+});
+$('s-clipkey-clear').addEventListener('click', () => save((s) => { s.clipInfoKey = ''; }));
 
 // ------------------------------------------------------------------ actions
 $('d-save-now').addEventListener('click', async () => {
@@ -676,6 +689,7 @@ function renderRendersForm() {
   $('rn-dest').value = r.copyDest;
   $('rn-after').value = r.afterQueue;
   $('s-after').value = settings.scene.afterQueue;
+  $('st-after').value = settings.stab.afterQueue; $('st-remove-markers').checked = Boolean(settings.stab.removeMarkers);
   $('enc-after').value = settings.encoder.afterQueue;
   renderCountdowns();
   renderShutdown();
@@ -739,7 +753,7 @@ function renderCountdowns() {
     const secs = settings[group].shutdownSeconds;
     el.querySelector('.cd-min').value = Math.floor(secs / 60);
     el.querySelector('.cd-sec').value = secs % 60;
-    const select = { scene: $('s-after'), renders: $('rn-after'), encoder: $('enc-after') }[group];   // manual: always shown
+    const select = { scene: $('s-after'), renders: $('rn-after'), encoder: $('enc-after'), stab: $('st-after') }[group];   // manual: always shown
     el.classList.toggle('hidden', Boolean(select) && select.value !== 'shutdown');
   });
 }
@@ -786,6 +800,7 @@ function renderShutdown() {
   const plan = [];
   if (settings.renders.afterQueue === 'shutdown') plan.push(`after renders${settings.renders.hd.enabled ? ' + HD review' : ''} (${fmtCountdown(settings.renders.shutdownSeconds)} countdown)`);
   if (settings.encoder.afterQueue === 'shutdown') plan.push(`after the encoder queue (${fmtCountdown(settings.encoder.shutdownSeconds)} countdown)`);
+  if (settings.stab?.afterQueue === 'shutdown') plan.push(`after the stabilization queue (${fmtCountdown(settings.stab.shutdownSeconds)} countdown)`);
   if (settings.scene.afterQueue === 'shutdown') plan.push(`after the scene cut queue (${fmtCountdown(settings.scene.shutdownSeconds)} countdown)`);
   $('d-shutdown').textContent = plan.length ? 'Planned' : 'Not planned';
   $('d-shutdown-sub').textContent = plan.length ? `Shuts down ${plan.join(' and ')}` : 'Choose "shut down" on the Renders or Scene Cuts page';
@@ -803,6 +818,7 @@ const EVENTS = [
   ['sceneQueueDone', 'The scene cut queue finishes'],
   ['encoderGroupDone', 'An encoder group finishes'],
   ['encoderQueueDone', 'The encoder queue finishes'],
+  ['stabQueueDone', 'The stabilization queue finishes'],
   ['shutdown', 'The PC is about to shut down'],
   ['autosaveFailed', 'Auto-save has a problem (e.g. NAS offline)'],
   ['projectCreated', 'A new project is created'],
@@ -1380,6 +1396,19 @@ async function libraryAction(action, button) {
   finally { libraryBusy = false; button.disabled = false; await refreshLibraryStatus(); }
 }
 for (const [id, action] of [['lb-check', 'check'], ['lb-run', 'run'], ['lb-schedule', 'schedule']]) $(id).addEventListener('click', e => libraryAction(action, e.currentTarget));
+async function librarySchedule(what) {
+  try {
+    if (what !== 'status') await saveLibraryForm();
+    const r = await pilot.libraryBackup(`schedule-${what}`);
+    if (!r.ok) throw Error(r.error);
+    $('lb-sched-state').textContent = r.scheduled ? `✅ Scheduled daily at ${r.times}` : 'Not scheduled';
+    $('lb-sched-state').style.color = r.scheduled ? 'var(--ok, #3ccf8e)' : '';
+    if (what !== 'status') toast(r.scheduled ? `Backups scheduled at ${r.times}` : 'Scheduled backups stopped');
+  } catch (err) { if (what !== 'status') toast(err.message, true); else $('lb-sched-state').textContent = ''; }
+}
+$('lb-sched-start').addEventListener('click', () => librarySchedule('start'));
+$('lb-sched-stop').addEventListener('click', () => librarySchedule('stop'));
+document.querySelector('.nav[data-page="librarybackup"]')?.addEventListener('click', () => librarySchedule('status'));
 $('lb-refresh').addEventListener('click', refreshLibraryStatus);
 pilot.onLibraryBackup(() => { if ($('page-librarybackup').classList.contains('active')) refreshLibraryStatus(); });
 setInterval(() => { if (settings && $('page-librarybackup').classList.contains('active')) refreshLibraryStatus(); }, 30000);
@@ -1430,7 +1459,10 @@ setInterval(() => { if (settings && $('page-librarybackup').classList.contains('
   renderRows();
   previewSeries();
   previewRename();
-  if (!settings.autosave.destinations.length) go('autosave');
+  // Reopen the last page used; the very first run starts on the Dashboard.
+  let lastPage = 'dashboard';
+  try { lastPage = localStorage.getItem('last-page') || 'dashboard'; } catch {}
+  go(document.getElementById(`page-${lastPage}`) ? lastPage : 'dashboard');
 
   let lastProject = null;
   pilot.onStatus((s) => {

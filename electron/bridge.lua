@@ -72,6 +72,34 @@ local function connect()
   return resolve
 end
 
+-- Clip under the playhead, for the always-on-top Clip Info window.
+local function clipinfo()
+  local r = connect()
+  if not r then return { ok = true, connected = false } end
+  local p = r:GetProjectManager():GetCurrentProject()
+  local tl = p and p:GetCurrentTimeline()
+  if not tl then return { ok = true, connected = true } end
+  local res = { ok = true, connected = true, timeline = tl:GetName(), timecode = tl:GetCurrentTimecode(),
+    fps = tonumber(tl:GetSetting('timelineFrameRate')), tlStart = tl:GetStartFrame(), page = r:GetCurrentPage() }
+  local it = tl:GetCurrentVideoItem()
+  if it then
+    local c = { name = it:GetName(), start = it:GetStart(), duration = it:GetDuration(), sourceIn = it:GetLeftOffset(),
+      color = it:GetClipColor(), fusion = it:GetFusionCompCount(), enabled = it:GetClipEnabled() }
+    pcall(function() local t = it:GetTrackTypeAndIndex(); c.track = t[2] end)
+    local m = it:GetMediaPoolItem()
+    if m then
+      local pr = m:GetClipProperty() or {}
+      c.file = pr['File Path']; c.resolution = pr['Resolution']; c.clipFps = pr['FPS']; c.codec = pr['Video Codec']
+      c.sourceDuration = pr['Duration']; c.audioCh = pr['Audio Ch']; c.created = pr['Date Created']; c.size = pr['File Size'] or pr['Size']
+    end
+    local marks = array()
+    for f, mk in pairs(it:GetMarkers() or {}) do marks[#marks + 1] = { frame = f, color = mk.color, name = mk.name, note = mk.note } end
+    c.markers = marks
+    res.clip = c
+  end
+  return res
+end
+
 local function status()
   local r = connect()
   if not r then return { ok = true, connected = false } end
@@ -611,6 +639,7 @@ while true do
         return { ok = false, error = 'Finish Encoder before modifying or backing up a project' }
       end
       if cmd == 'status' then return status()
+      elseif cmd == 'clipinfo' then return clipinfo()
       elseif cmd == 'stabilize' then
         if encoderSession then return {ok=false,error='Finish Encoder first'} end
         stabilize = stabilize or dofile('stabilization.lua')(connect, array)

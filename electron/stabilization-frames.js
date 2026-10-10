@@ -10,7 +10,7 @@ function createFrameGrabber({bridge,nativeImage,directory}) {
       for(const frame of frames) {
         // Remove the preceding frame so a failed export cannot reuse stale pixels.
         fs.rmSync(file,{force:true});
-        const result=await bridge.stabilize({action:'frame',key:clip.key,frame,file});
+        const result=await bridge.stabilize({action:'frame',key:clip.lkey||clip.key,frame,file});
         if(!result.ok)throw Error(result.error);
         const image=nativeImage.createFromPath(file);
         if(image.isEmpty())throw Error('Resolve returned an empty frame');

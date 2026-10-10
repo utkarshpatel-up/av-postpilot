@@ -13,7 +13,7 @@ PCs need nothing extra installed: no Python.
 | **Auto-save** | Exports the open project as `.drp` every N minutes to several locations, only when it changed |
 | **Library Backup** | Monitors existing Mac/NAS database dumps; backs up whole PostgreSQL libraries, roles and optional secondary copies on the server |
 | **Scene Cuts** | Queue of timelines for *Detect Scene Cuts*, run one after another |
-| **Stabilization** | Stabilizes the clips you marked as shaky: picks fixed background points itself, tracks them in Fusion in a timeline copy, green/orange verdict |
+| **Stabilization** | Stabilizes marked shaky clips on one or more timelines: Fusion tracking on rigid details (Lock, or Smooth when the camera moves on purpose), Resolve's stabilizer when there is no rigid reference, edge zoom, review/approve onto your timeline |
 | **Episodes** | Creates episode series with a Text+ title; renames a series later (the `(…)` cue never changes) |
 | **Renders** | Copies each finished render, optional HD review pass (one temporary timeline, individual clips, cleaned up afterwards), shutdown with countdown |
 | **New Project** · **Episodes** · **Encoder** | Project folders / bins / Master-Edit timelines; episode series with plain or colour-bar titles; Media-Encoder-style queue with Resolve presets |
@@ -78,28 +78,63 @@ the ntfy phone app. Reuse the team topic on all editing PCs and add personal
 topics on the relevant PCs. Subscribing to both topics produces two notifications
 for an event sent to both. Existing single-topic settings are preserved on upgrade.
 
-## Stabilization
-Put a marker on each shaky clip in Resolve, choose the marker color (or **All
-colors**), click **Find marked clips**, then **Stabilize selected clips**.
-PostPilot saves the project and works in a duplicate of the timeline.
+## Stabilization (3.0)
+Put a marker on each shaky clip in Resolve. On the Stabilization page tick the
+timelines (several run one after another), choose the marker colour, click
+**Find marked clips**, then **Stabilize selected clips**. PostPilot saves the
+project and works in one duplicate per timeline ("… - PostPilot Stabilized HHMMSS").
+Clips with real Fusion work are skipped; empty default comps are reused.
 
-For each clip it:
-1. reads 5 frames and keeps details that move exactly like the background
-   (chairs, rails, backdrops, banners) and spreads about 8 of them across the frame;
-   people are rejected because they move on their own;
-2. tracks all of them in one Fusion Tracker pass with classic point trackers
-   (IntelliTrack drifts slowly, so it is never used);
-3. keeps only the points that moved together (the camera shake) and applies
-   Match Move on their average.
+Per clip:
+1. **Pick details** from 5 frames (first, +2, +4, middle, last). The whole-picture
+   movement is estimated first, so a swinging camera is followed. Details that stay
+   put through the clip (chairs, rails, backdrops, banners) are preferred, spread
+   across the frame from the edges inwards.
+2. **No fixed detail at all** (tight audience shots, blurred crowd) → Resolve's own
+   stabilizer is used straight away (whole-picture analysis, default settings).
+3. Otherwise about 8 details are **tracked in one Fusion pass** with classic point
+   trackers (IntelliTrack drifts and is never used).
+4. **Trust check:** the points must agree with each other over the whole clip.
+   Lock: agreeing points drive a Fusion Match Move; when trackers slip, a two-pass
+   per-frame median is used instead (Transform node with a per-frame correction).
+   If the points still disagree (more than 6 px at 4K) there is no rigid reference
+   and Resolve's stabilizer is used instead.
+5. **Edge zoom:** the smallest zoom that hides black edges (plus 0.2 %, max 1.03) on
+   a Transform node after the tracker.
 
-**Green / Passed:** 3 or more points agree and the expected leftover is at most
-0.5 px (4K pixels). **Orange / Needs review:** only 2 points agreed or the leftover
-is higher (applied, check it), or fewer than 2 (left unstabilized). For an orange
-clip, open **Choose points (optional)** and click a few rigid details yourself;
-they are tracked together with the automatic ones. About 3.5 minutes per
-600-frame 4K clip; no frames are exported for checking, no extra disk space.
-Clips that already have Fusion effects are skipped. Check frame edges in playback.
-Results are written to `stabilization-last-report.json` in the application data folder.
+**Lock** is the default: all camera movement is removed. Tick **Camera moves on
+purpose** on a clip (rare) for **Smooth**: slow camera moves are kept and only the
+fast shake is removed.
+
+Status: green **Passed**, yellow **Stabilized (Resolve)** (check by eye), orange
+**Needs review**. A live bar shows the clip in progress, per-clip time and the total.
+When the queue finishes PostPilot can notify (event *The stabilization queue
+finishes*) and shut the PC down with a countdown.
+
+**Review and apply:** ▶ Review jumps Resolve to the clip in the copy, ⇄ Original to
+the same clip in your timeline. ✔ Approve (or *Approve all passed*) copies the
+stabilization onto your clip (exported/imported Fusion comp, or Resolve's stabilizer
+run on your clip) and restores its own clip colour; optionally the markers are
+removed. ↺ Undo removes a Fusion stabilization again and restores markers; a Resolve
+stabilization is reset in the Color page (Tracker > Stabilizer). Approve refuses if
+the clip was edited after the run. Results: `stabilization-last-report.json`.
+
+Measured on 4K test shots: rigid backgrounds about half the shake left, no black
+edges; tight audience shots via Resolve's stabilizer. Tools for checking new kinds
+of footage are in `dev/` (`stab_harness.js`, `measure_shake.js`, `measure_points.js`,
+`edge_check.js`).
+
+## Clip Info window
+Settings → *Show the Clip Info window* (or tray, or **Ctrl+Alt+I**, changeable in
+Settings): a small always-on-top box with the clip under Resolve's playhead —
+duration, length in frames, timeline In/Out, resolution, frame rate, codec;
+**+ more** adds source In/Out, file path, markers and the clip name.
+
+## Scheduled library backups (3.0)
+Library Backup → **Start scheduled backups** installs the schedule itself (launchd
+on Mac, Task Scheduler on Windows) for the daily times; **Stop** removes it. Runs
+while PostPilot is closed; the user must stay logged in. The script export is still
+under *Advanced*.
 
 ## Encoder (2.0.1)
 Encoder asks before saving and closing the current Resolve project, then uses a
