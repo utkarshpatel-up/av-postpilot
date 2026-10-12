@@ -214,11 +214,13 @@ function sequences(g) {
 // the tail of the original path under each search folder (project folder first).
 function locate(original, { relative, history = [], projectDir, roots = [], exists }) {
   const tries = [original];
-  if (relative && projectDir) tries.push(path.win32.resolve(projectDir, relative.replace(/&amp;/g, '&')));
+  // Paths are joined the way the folder they start from is written (Windows drive/UNC or POSIX).
+  const P = dir => /^([a-z]:|[\\/]{2})/i.test(dir) ? path.win32 : path.posix;
+  if (relative && projectDir) tries.push(P(projectDir).resolve(projectDir, ...relative.replace(/&amp;/g, '&').split(/[\\/]+/)));
   tries.push(...history);
   const parts = String(original).split(/[\\/]+/).filter(Boolean);
   for (const root of [projectDir, ...roots].filter(Boolean))
-    for (let i = 1; i < parts.length; i++) tries.push(path.win32.join(root, ...parts.slice(i)));
+    for (let i = 1; i < parts.length; i++) tries.push(P(root).join(root, ...parts.slice(i)));
   for (const t of tries) if (t && exists(t)) return { path: t, status: t === original ? 'found' : 'relinked' };
   return { path: '', status: 'missing' };
 }
@@ -250,7 +252,7 @@ const fontKey = f => f.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 function analyze(file, { roots = [], exists = p => fs.existsSync(p), fonts = null, graph } = {}) {
   const g = graph || readProject(file);
-  const projectDir = path.win32.dirname(file);
+  const projectDir = (/^([a-z]:|[\\/]{2})/i.test(file) ? path.win32 : path.posix).dirname(file);
   const seqs = sequences(g);
   const used = new Set(seqs.flatMap(s => [...s.video.items, ...s.audio.items].map(i => i.media).filter(Boolean)));
   const tree = binTree(g);

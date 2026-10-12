@@ -10,13 +10,16 @@ const { decodePng } = require('./png');
 const MARK = { fix: 'Purple', grade: 'Sky' };
 const norm = p => String(p).replace(/\//g, '\\').toLowerCase();
 
+// file URLs ⇄ paths: Windows drives (file://localhost/E:/…), UNC (file://server/share/…), Mac (file://localhost/Volumes/…).
 const fromUrl = u => {
-  let p = decodeURIComponent(u.replace(/^file:\/\/(localhost)?\/?/i, ''));
-  if (/^[a-z]:/i.test(p)) p = p.replace(/\//g, '\\');
-  else if (!p.startsWith('/')) p = '\\\\' + p.replace(/\//g, '\\'); // file://server/share
-  return p;
+  const local = /^file:\/\/(localhost)?\//i.test(u);
+  let p = decodeURIComponent(u.replace(/^file:\/\/(localhost)?/i, ''));
+  if (/^\/[a-z]:/i.test(p)) return p.slice(1).replace(/\//g, '\\');
+  if (!local) return '\\\\' + p.replace(/^\/+/, '').replace(/\//g, '\\'); // file://server/share
+  return p; // POSIX
 };
 const toUrl = p => {
+  if (p.startsWith('/')) return 'file://localhost' + p.split('/').map(encodeURIComponent).join('/');
   const unc = p.startsWith('\\\\');
   const parts = p.replace(/^\\\\/, '').split('\\').map((s, i) => i === 0 && /^[a-z]:$/i.test(s) ? s : encodeURIComponent(s));
   return unc ? `file://${parts.join('/')}` : `file://localhost/${parts.join('/')}`;

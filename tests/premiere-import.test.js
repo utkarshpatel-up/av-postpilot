@@ -78,6 +78,11 @@ test('locate tries the original, then the tail of the path under each folder', (
   const exists = p => seen.has(p);
   assert.deepEqual(locate('F:\\Show\\Footage\\A.mov', { projectDir: 'E:\\Archive\\Show', exists }), { path: 'E:\\Archive\\Show\\Footage\\A.mov', status: 'relinked' });
   assert.equal(locate('F:\\Nope\\B.mov', { projectDir: 'E:\\Archive\\Show', exists }).status, 'missing');
+  // A project opened from a Mac path: joined Mac-style.
+  const mac = new Set(['/Volumes/NAS/Show/Footage/A.mov', '/Volumes/NAS/Show/Audio/B.wav']);
+  assert.deepEqual(locate('F:\\Show\\Footage\\A.mov', { projectDir: '/Volumes/NAS/Show', exists: p => mac.has(p) }), { path: '/Volumes/NAS/Show/Footage/A.mov', status: 'relinked' });
+  assert.equal(locate('G:\\Old\\B.wav', { projectDir: '/Volumes/NAS/Show', relative: '.\\Audio\\B.wav', exists: p => mac.has(p) }).path, '/Volumes/NAS/Show/Audio/B.wav');
+  assert.equal(locate('F:\\Show\\Footage\\A.mov', { projectDir: '\\\\NAS\\Archive\\Show', exists: p => p === '\\\\NAS\\Archive\\Show\\Footage\\A.mov' }).status, 'relinked');
 });
 
 test('pathurls convert both ways and XML is relinked', () => {
@@ -85,6 +90,9 @@ test('pathurls convert both ways and XML is relinked', () => {
   assert.equal(fromUrl(url), 'F:\\Edit 1207\\Satsang Files\\NRI & Other.mov');
   assert.equal(toUrl('E:\\Projects Done\\a & b.mov'), 'file://localhost/E:/Projects%20Done/a%20%26%20b.mov');
   assert.equal(fromUrl(toUrl('\\\\NAS\\share\\x y.mov')), '\\\\NAS\\share\\x y.mov');
+  assert.equal(toUrl('/Volumes/NAS/a & b.mov'), 'file://localhost/Volumes/NAS/a%20%26%20b.mov');
+  assert.equal(fromUrl('file://localhost/Volumes/NAS/a%20%26%20b.mov'), '/Volumes/NAS/a & b.mov');
+  assert.equal(fromUrl('file:///Volumes/NAS/x.mov'), '/Volumes/NAS/x.mov');
   const xml = `<xmeml version="4"><sequence id="s"><uuid>u</uuid><name>Edit &amp; 1</name><media><pathurl>${url}</pathurl><pathurl>file://localhost/G%3a/gone.mov</pathurl></media></sequence></xmeml>`;
   assert.equal(xmlSequenceName(xml), 'Edit & 1');
   const r = relinkXml(xml, p => p.startsWith('F:') ? p.replace('F:\\Edit 1207', 'E:\\Done\\Edit 1207') : '');

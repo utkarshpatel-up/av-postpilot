@@ -5,8 +5,18 @@ backup server can be a Mac). It talks to Resolve through Resolve's own script ru
 (`fuscript.exe` + `electron/bridge.lua`), so the editing PCs need nothing extra
 installed: no Python.
 
-**Current version: 3.0.0** — downloads in `dist/`: Windows installer, Windows portable
+**Current version: 3.1.0** — downloads in `dist/`: Windows installer, Windows portable
 ZIP, macOS ZIPs for Apple Silicon (arm64) and Intel (x64), plus SHA-256 checksums.
+
+## New in 3.1
+- **Premiere Import page**: brings a whole Premiere Pro project into Resolve.
+  Premiere's bins are rebuilt with all their media (relinked to where the files are
+  now), every sequence becomes a timeline in its own bin, titles are rebuilt as Text+
+  matched to Premiere's own frames, and markers show what needs redoing (Lumetri,
+  Neat Video, Mocha, speed changes).
+- **Premiere link**: a small signed helper inside Premiere (one click, no admin
+  rights) so PostPilot can have Premiere export the XML and title frames itself.
+- **Episodes**: every new episode gets 5 s of black after its 5 s title.
 
 ## New in 3.0
 - **Stabilization page**: marked shaky clips on one or more timelines; Fusion
@@ -30,10 +40,11 @@ ZIP, macOS ZIPs for Apple Silicon (arm64) and Intel (x64), plus SHA-256 checksum
 | **Dashboard** | Resolve connection, open project/library, auto-save status, shutdown countdown, render queue |
 | **New Project** | Creates the project folders, moves (same drive) or copies the satsang day folders into `Satsang Files`, builds the Resolve project with bins, nested footage and `Master-` / `Edit-` timelines |
 | **Auto-save** | Exports the open project as `.drp` every N minutes to several locations, only when it changed |
+| **Premiere Import** | Report of a Premiere project (sequences, media found/missing, effects, titles, fonts); imports the whole project into Resolve with its bins, relinked media, Text+ titles and fix-up markers |
 | **Library Backup** | Monitors existing Mac/NAS database dumps; backs up whole PostgreSQL libraries, roles and optional secondary copies on the server; Start/Stop scheduled backups |
 | **Scene Cuts** | Queue of timelines for *Detect Scene Cuts*, run one after another |
 | **Stabilization** | Stabilizes marked shaky clips on one or more timelines: Fusion tracking on rigid details (Lock, or Smooth when the camera moves on purpose), Resolve's stabilizer when there is no rigid reference, edge zoom, review/approve onto your timeline, delete approved copies |
-| **Episodes** | Creates episode series with a Text+ title; renames a series later (the `(…)` cue never changes) |
+| **Episodes** | Creates episode series with a Text+ title (plain or on colour bars) followed by 5 s of black; renames a series later (the `(…)` cue never changes) |
 | **Renders** | Copies each finished render, optional HD review pass (one temporary timeline, individual clips, cleaned up afterwards), shutdown with countdown |
 | **Encoder** | Media-Encoder-style queue with Resolve presets in a disposable project; optional copy of finished files |
 | **Clip Info** (window) | Always-on-top box with the clip under the playhead; Settings switch, tray, Ctrl+Alt+I |
@@ -44,9 +55,10 @@ Footage is never deleted.
 ## Each editing PC
 1. Either install `AV-PostPilot-<version>-Windows-Setup.exe`, or extract `AV-PostPilot-<version>-Windows-Portable.zip` into a local folder you can write to and double-click `AV PostPilot.exe`. The ZIP needs no installation or administrator rights. Keep all extracted files and folders together; do not run it from inside the ZIP.
 2. Resolve: *Preferences → System → General → External scripting using: **Local***.
-3. Resolve: *Preferences → User → Editing → Standard Generator Duration* = episode title length.
+3. Resolve: *Preferences → User → Editing → Standard Generator Duration* = **5 seconds** (episode title and the black after it; PostPilot warns otherwise).
 4. PostPilot: set the Auto-save locations; tokens on the Notifications page.
 5. Optional: Settings → *Show the Clip Info window* and its shortcut.
+6. On the PC that keeps Premiere Pro: Premiere Import → **Set up Premiere link** (restart Premiere once).
 
 ## Development
 ```
@@ -149,6 +161,49 @@ edges; tight audience shots via Resolve's stabilizer. Tools for checking new kin
 of footage are in `dev/` (`stab_harness.js`, `measure_shake.js`, `measure_points.js`,
 `edge_check.js`).
 
+## Premiere Import (3.1)
+For moving older Premiere Pro projects into Resolve.
+
+1. **Open Premiere project…** — PostPilot reads the `.prproj` itself (Premiere need not
+   be open) and shows: sequences (format, length, clip counts), media found / missing
+   (files moved to another drive are found again through the project folder and
+   *Also look for footage in*), what transfers and what has to be redone, title fonts.
+2. **Import whole project into Resolve** — by default into a Resolve project named
+   after the Premiere project, created with the sequence's frame rate and size (or
+   *into the project open in Resolve*, under `Premiere Import / <project>`):
+   - Premiere's bins are rebuilt with **all** their media, also clips no sequence uses;
+   - each sequence comes from Premiere's Final Cut Pro XML (exported by the Premiere
+     link, or exported by hand into the project folder) with footage paths pointed at
+     where the files are now, and goes into its Premiere bin, linked to that media;
+   - **titles** become a clip on the same track and time with a **Text+** inside
+     (same text, font, size, colour, position). With the Premiere link, Premiere
+     renders the frame with and without the title and each line is fitted to it
+     (measured within a few pixels, also over bars or footage, also legacy titles);
+   - Premiere's **Bars and Tone** becomes Resolve's SMPTE bars still, **Black Video**
+     becomes black, both with their exact length (title lengths come from the XML,
+     not from Resolve's generator duration);
+   - markers: **Purple** = redo (Mocha, speed changes, title parts Text+ can't copy),
+     **Sky** = the clip's Lumetri settings.
+3. **Grade once per look** — clips that had identical Lumetri (+ Neat Video) settings:
+   grade the first clip, then *Copy its grade to the others*.
+
+Lumetri, Neat Video and Mocha do not transfer (Premiere leaves them out of the XML);
+Neat Video profile names are listed per look.
+
+### Premiere link
+Premiere Import → **Set up Premiere link** copies a signed helper into the user's own
+`%APPDATA%\Adobe\CEP\extensions` (no administrator rights, nothing in Program Files);
+restart Premiere once. PostPilot then starts Premiere when needed, opens the project,
+exports XML and title frames, and closes the project again without saving if it opened
+it. Premiere's informational *Load Project* notice (missing plugins) is closed
+automatically; any other dialog is reported. The helper only runs a fixed set of
+commands, given through job files in `%APPDATA%\av-postpilot-link`.
+
+Developers: the helper's source is `cep/postpilot-link`; `node dev/sign_link.js` signs
+it with `dev/tools/ZXPSignCmd.exe` and the self-signed certificate in `dev/tools` (not in
+git — keep a copy) and unpacks the signed copy into `electron/premiere-link`, which ships
+with the app (`.gitattributes` keeps its bytes exact).
+
 ## When a queue finishes (all modules)
 Scene Cuts, Renders, Encoder and Stabilization each have **When the queue finishes**:
 - **Do nothing** — that module sends no messages (render failures and shutdown
@@ -216,6 +271,13 @@ templates for proactive alerts; it is not implemented in this version.
 - Opening a clip on the Fusion page creates an empty comp; empty comps don't count as Fusion work.
 - Stabilizer settings of `TimelineItem:Stabilize()` can't be set by script (defaults are used) or reset by script.
 - Approving copies Fusion stabilization with `ExportFusionComp` / `ImportFusionComp`.
+- A timeline clip's length can't be changed by script; inserted titles/generators take the *Standard Generator Duration*. Lengths from an imported XML are kept exactly.
+- `InsertFusionTitleIntoTimeline` ripples every track; Premiere titles go in as placeholder clips through the XML instead.
+- XML imports with a Premiere title (`GraphicAndType…`) fail completely; Premiere's Bars and Tone / Black Video can't be imported either: PostPilot swaps them before importing.
+- Fusion comps on generator clips can't be made by script; on still and video clips they can (playhead on the clip, Fusion page, `ConnectInput`).
+- Track on/off is only reported for the current timeline, and switching it on the Deliver page doesn't stick.
+- Resolve's unsaved *Untitled Project* refuses project settings and asks for a name when saved.
+- Premiere's ExtendScript reads chained `a ? b : c ? d : e` left to right; the Premiere helper avoids it.
 
 ## Also in this repo
 `resolve-db-backup/`: backup and restore scripts for the Mac PostgreSQL project server (launchd, project-count alarm, restore into a separate `restore_…` library). See `resolve-db-backup/HOW_TO_RESTORE.txt`.

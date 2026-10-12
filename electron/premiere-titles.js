@@ -18,7 +18,8 @@ function transparentPng(width, height) {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw, { level: 9 })), chunk('IEND', Buffer.alloc(0))]);
 }
 
-const toUrl = p => 'file://localhost/' + p.replace(/\\/g, '/').split('/').map((s, i) => i === 0 && /^[a-z]:$/i.test(s) ? s : encodeURIComponent(s)).join('/');
+const toUrl = p => p.startsWith('/') ? 'file://localhost' + p.split('/').map(encodeURIComponent).join('/')
+  : 'file://localhost/' + p.replace(/\\/g, '/').split('/').map((s, i) => i === 0 && /^[a-z]:$/i.test(s) ? s : encodeURIComponent(s)).join('/');
 const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 // Premiere's own generated clips are "files" without media, which Resolve can't import:
