@@ -15,6 +15,8 @@ const { SceneQueue } = require('./scenequeue');
 const { Encoder } = require('./encoder');
 const { Stabilization } = require('./stabilization');
 const { createFrameGrabber } = require('./stabilization-frames');
+const { PremiereImport } = require('./premiere-import');
+const { PremiereLink } = require('./premiere-link');
 const seriesList = require('./series-list');
 const libraryBackup = require('./library-backup');
 const { checkOverdue } = require('./library-overdue');
@@ -135,6 +137,7 @@ const bridgeLua = path.join(DATA, 'bridge.lua');
 fs.mkdirSync(DATA, { recursive: true });
 fs.writeFileSync(bridgeLua, fs.readFileSync(path.join(__dirname, 'bridge.lua')));
 fs.writeFileSync(path.join(DATA, 'stabilization.lua'), fs.readFileSync(path.join(__dirname, 'stabilization.lua')));
+fs.writeFileSync(path.join(DATA, 'premiere.lua'), fs.readFileSync(path.join(__dirname, 'premiere.lua')));
 
 const bridge = new ResolveBridge({
   getFuscriptPath: () => process.platform === 'darwin' ? '/Applications/DaVinci Resolve/DaVinci Resolve.app/Contents/Libraries/Fusion/fuscript' : path.join(path.dirname(settings.resolvePath), 'fuscript.exe'),
@@ -380,6 +383,25 @@ const stabilization = new Stabilization({ bridge, log, onChange: s => send('stab
   saveReport:report=>fs.writeFileSync(path.join(DATA,'stabilization-last-report.json'),JSON.stringify(report,null,2)) });
 autosaver.isPaused = () => encoder.running || stabilization.running;
 
+// Installed font names, for the Premiere title check (Windows registry / Mac font folders).
+let fontCache = null;
+function installedFonts() {
+  if (fontCache) return fontCache;
+  try {
+    if (process.platform === 'win32') {
+      const { execFileSync } = require('child_process');
+      fontCache = ['HKLM', 'HKCU'].flatMap(h => {
+        try { return execFileSync('reg', ['query', h + '\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Fonts'], { encoding: 'utf8', windowsHide: true }).split(/\r?\n/).map(l => l.trim().split(/\s+REG_SZ\s+/)[0]).filter(Boolean); } catch { return []; }
+      });
+    } else {
+      fontCache = ['/Library/Fonts', '/System/Library/Fonts', path.join(os.homedir(), 'Library/Fonts')].flatMap(d => { try { return fs.readdirSync(d).map(f => f.replace(/\.[^.]+$/, '')); } catch { return []; } });
+    }
+  } catch { fontCache = null; }
+  return fontCache;
+}
+const premiereLink = new PremiereLink({ log });
+const premiere = new PremiereImport({ bridge, link: premiereLink, log, dir: path.join(DATA, 'premiere-import'), fonts: installedFonts, onChange: s => send('premiere', s) });
+
 const sceneQueue = new SceneQueue({
   bridge, notifier, log, getSettings: () => settings,
   onChange: () => { send('scene', sceneQueue.summary()); updateTray(); },
@@ -594,6 +616,29 @@ ipcMain.handle('stabilize', async (_e, args) => {
     }
     return { ok: false, error: 'Unknown stabilization action' };
   } catch (error) { return { ok: false, error: error.message }; }
+});
+ipcMain.handle('premiere', async (_e, args) => {
+  try {
+    if (args.action === 'summary') return { ok: true, ...premiere.summary() };
+    if (args.action === 'pick-project') {
+      const r = await dialog.showOpenDialog(win, { title: 'Open a Premiere Pro project', properties: ['openFile'], filters: [{ name: 'Premiere Pro project', extensions: ['prproj'] }] });
+      return { ok: true, file: r.canceled ? '' : r.filePaths[0] };
+    }
+    if (args.action === 'pick-xml') {
+      const r = await dialog.showOpenDialog(win, { title: 'Add Final Cut Pro XML exported from Premiere', defaultPath: args.folder || undefined, properties: ['openFile', 'multiSelections'], filters: [{ name: 'Final Cut Pro XML', extensions: ['xml'] }] });
+      return r.canceled ? { ok: true, added: 0, unknown: [] } : premiere.addXmls(r.filePaths);
+    }
+    if (args.action === 'link-status') return { ok: true, ...premiereLink.status() };
+    if (args.action === 'link-install') return premiereLink.install();
+    if (args.action === 'analyze') return { ok: true, ...premiere.analyze(args.file, args.roots || []) };
+    if (args.action === 'rescan') { premiere.attachXmls(); return { ok: true, ...premiere.summary() }; }
+    if (encoder.running || stabilization.running) return { ok: false, error: 'Finish Encoder / Stabilization first' };
+    if (args.action === 'fetch-xml') return await premiere.fromPremiere(args.names || []);
+    if (args.action === 'import') return await premiere.importSequences(args.names || [], { markGrades: args.markGrades !== false, newProject: args.newProject !== false });
+    if (args.action === 'goto') return await premiere.goto(args.sequence, args.track, args.start);
+    if (args.action === 'copygrade') return await premiere.copyGrade(args.sequence, args.look);
+    return { ok: false, error: 'Unknown Premiere action' };
+  } catch (err) { return { ok: false, error: err.message }; }
 });
 ipcMain.handle('save-settings', (_e, next) => applySettings(next));
 ipcMain.handle('save-now', () => autosaver.run('manual'));

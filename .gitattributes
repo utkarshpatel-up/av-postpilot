@@ -1,1 +1,2 @@
 /stop-old-mac-backup.sh text eol=lf
+electron/premiere-link/** -text

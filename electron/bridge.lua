@@ -287,7 +287,21 @@ local function series(a)
         problems[#problems + 1] = e.name .. ': could not create timeline'
       else
         p:SetCurrentTimeline(tl)
-        local tp = textPlus(tl:InsertFusionTitleIntoTimeline('Text+'))
+        local titleItem = tl:InsertFusionTitleIntoTimeline('Text+')
+        local tp = textPlus(titleItem)
+        -- Episode standard: 5 s title, then 5 s of black (Solid Color is black by default).
+        -- Both lengths come from Resolve's "Standard generator duration" preference.
+        if titleItem then
+          local fps = math.floor((tonumber(tl:GetSetting('timelineFrameRate')) or 25) + 0.5)
+          local f = titleItem:GetEnd()
+          tl:SetCurrentTimecode(string.format('%02d:%02d:%02d:%02d', math.floor(f / (fps * 3600)), math.floor(f / (fps * 60)) % 60, math.floor(f / fps) % 60, f % fps))
+          local black = tl:InsertGeneratorIntoTimeline('Solid Color')
+          if not black then problems[#problems + 1] = e.name .. ': 5 s black could not be added'
+          elseif black:GetStart() ~= titleItem:GetEnd() then problems[#problems + 1] = e.name .. ': black was not placed right after the title' end
+          if titleItem:GetDuration() ~= 5 * fps or (black and black:GetDuration() ~= 5 * fps) then
+            problems[#problems + 1] = e.name .. ': title/black are not 5 s; set Preferences > User > Editing > Standard generator duration to 5 seconds'
+          end
+        end
         if tp then
           tp:SetInput('StyledText', e.line1 .. '\n' .. e.subtitle)
           tp:SetInput('Font', a.font or 'Calibri')
@@ -625,7 +639,7 @@ local function stoprender()
 end
 
 ---------------------------------------------------------------- main loop
-local stabilize
+local stabilize, premiere
 reply({ ok = true, ready = true })
 while true do
   local line = io.read('*l')
@@ -644,6 +658,10 @@ while true do
         if encoderSession then return {ok=false,error='Finish Encoder first'} end
         stabilize = stabilize or dofile('stabilization.lua')(connect, array)
         return stabilize(parse(arg))
+      elseif cmd == 'premiere' then
+        if encoderSession then return {ok=false,error='Finish Encoder first'} end
+        premiere = premiere or dofile('premiere.lua')(connect, array)
+        return premiere(parse(arg))
       elseif cmd == 'export' then return export(arg)
       elseif cmd == 'save' then return save()
       elseif cmd == 'setup' then return setup(parse(arg))

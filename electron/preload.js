@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('pilot', {
   onClipInfo: on('clipinfo'),
   stabilize: (action, args = {}) => ipcRenderer.invoke('stabilize', { action, ...args }),
   onStabilize: on('stabilize'),
+  premiere: (action, args = {}) => ipcRenderer.invoke('premiere', { action, ...args }),
+  onPremiere: on('premiere'),
   libraryBackup: (action, options) => ipcRenderer.invoke('library-backup', action, options),
   onLibraryBackup: on('library-backup'),
   saveSettings: (s) => ipcRenderer.invoke('save-settings', s),

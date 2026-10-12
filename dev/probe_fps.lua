@@ -1,0 +1,5 @@
+local r = bmd.scriptapp('Resolve', 'localhost'); local p = r:GetProjectManager():GetCurrentProject()
+print('a', p:SetSetting('timelinePlaybackFrameRate','25'), p:GetSetting('timelinePlaybackFrameRate'))
+print('b', p:SetSetting('timelineFrameRate','25'), p:GetSetting('timelineFrameRate'))
+print('c', p:SetSetting('timelineResolutionWidth','3840'), p:GetSetting('timelineResolutionWidth'))
+print('name', p:GetName(), r:GetProjectManager():GetCurrentDatabase().DbName)

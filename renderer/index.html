@@ -43,6 +43,16 @@
   </aside>
 
   <main>
+    <section class="page" id="page-premiere">
+      <h1>Premiere Import</h1>
+      <p class="lead">Bring an older Premiere Pro project into Resolve: see what transfers, import the edit with the footage relinked, and get markers on what needs redoing.</p>
+      <div class="card">
+        <div class="row"><button class="btn primary" id="pr-open">Open Premiere project…</button><span class="muted small" id="pr-file">Read directly from the .prproj — Premiere doesn't need to be open.</span></div>
+        <div class="row"><span id="pr-link" class="small"></span><button class="btn" id="pr-link-setup">Set up Premiere link</button></div>
+        <div class="row"><label for="pr-roots">Also look for footage in</label><input type="text" id="pr-roots" style="flex:1" placeholder="optional, e.g. \NAS\Footage; E:\Archive (separate with ;)"><button class="btn" id="pr-reanalyze" disabled>Check again</button></div>
+      </div>
+      <div id="pr-report"></div>
+    </section>
     <section class="page" id="page-stabilization">
       <h1>Stabilization</h1>
       <p class="lead">Mark the shaky clips in Resolve, find them here and stabilize. PostPilot picks fixed details itself and works in a copy of your timeline.</p>
@@ -645,6 +655,7 @@
   <div class="toast hidden" id="toast"></div>
   <script src="app.js"></script>
   <script src="stabilization.js"></script>
+  <script src="premiere.js"></script>
 </body>
 </html>
 
