@@ -32,12 +32,12 @@
         <svg viewBox="0 0 24 24"><path d="M4 5h16v2H4zm0 4h10v2H4zm0 4h10v2H4zm0 4h16v2H4zm12-8 6 4-6 4z"/></svg>Encoder<span class="soon hidden" id="nav-enc-badge"></span></button>
       <button class="nav" data-page="notify">
         <svg viewBox="0 0 24 24"><path d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6V11a6 6 0 0 0-5-5.9V4a1 1 0 0 0-2 0v1.1A6 6 0 0 0 6 11v5l-2 2v1h16v-1z"/></svg>Notifications</button>
-      <button class="nav" data-page="activity">
-        <svg viewBox="0 0 24 24"><path d="M3 5h18v2H3zm0 6h18v2H3zm0 6h12v2H3z"/></svg>Activity</button>
-      <button class="nav" data-page="settings">
-        <svg viewBox="0 0 24 24"><path d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.6 7.6 0 0 0-1.7-1L15 3h-4l-.4 2.7a7.6 7.6 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.5 7.5 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.6 7.6 0 0 0 1.7 1L11 21h4l.4-2.7a7.6 7.6 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>Settings</button>
       <button class="nav" data-page="librarybackup">
         <svg viewBox="0 0 24 24"><path d="M12 2C6.5 2 2 4.2 2 7v10c0 2.8 4.5 5 10 5s10-2.2 10-5V7c0-2.8-4.5-5-10-5zm0 2c4.8 0 8 1.8 8 3s-3.2 3-8 3-8-1.8-8-3 3.2-3 8-3zm0 16c-4.8 0-8-1.8-8-3v-2c1.8 1.2 4.7 2 8 2s6.2-.8 8-2v2c0 1.2-3.2 3-8 3z"/></svg>Library Backup</button>
+      <button class="nav" data-page="settings">
+        <svg viewBox="0 0 24 24"><path d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.6 7.6 0 0 0-1.7-1L15 3h-4l-.4 2.7a7.6 7.6 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.5 7.5 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.6 7.6 0 0 0 1.7 1L11 21h4l.4-2.7a7.6 7.6 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>Settings</button>
+      <button class="nav" data-page="activity">
+        <svg viewBox="0 0 24 24"><path d="M3 5h18v2H3zm0 6h18v2H3zm0 6h12v2H3z"/></svg>Activity</button>
     </nav>
     <div class="sidebar-foot" id="app-version"></div>
   </aside>
@@ -111,11 +111,29 @@
         </div>
       </div>
 
-      <div class="card">
+      <div class="card" id="d-idle-card"><div class="card-label">Queues</div><div class="muted">Nothing rendering, cutting scenes or stabilizing right now.</div></div>
+
+      <div class="card hidden" id="d-render-card">
         <div class="card-head"><div class="card-label">Render queue</div><button class="link" data-goto="renders">Render settings</button></div>
         <table class="jobs">
           <thead><tr><th>Job</th><th>Timeline</th><th>Output</th><th>Status</th></tr></thead>
           <tbody id="d-jobs"><tr><td colspan="4" class="muted">No render jobs</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="card hidden" id="d-scene-card">
+        <div class="card-head"><div class="card-label">Scene cut queue</div><button class="link" data-goto="scene">Scene Cuts</button></div>
+        <table class="jobs">
+          <thead><tr><th>Timeline</th><th>Status</th><th>Result</th></tr></thead>
+          <tbody id="d-scene"><tr><td colspan="3" class="muted">Nothing queued</td></tr></tbody>
+        </table>
+      </div>
+
+      <div class="card hidden" id="d-stab-card">
+        <div class="card-head"><div class="card-label">Stabilization queue</div><button class="link" data-goto="stabilization">Stabilization</button></div>
+        <table class="jobs">
+          <thead><tr><th>Timeline</th><th>Clip</th><th>Status</th></tr></thead>
+          <tbody id="d-stab"><tr><td colspan="3" class="muted">Nothing queued</td></tr></tbody>
         </table>
       </div>
 
@@ -467,98 +485,112 @@
     <!-- ================================================= Notifications -->
     <section class="page" id="page-notify">
       <h1>Notifications</h1>
-      <p class="lead">Send event alerts to your phone through ntfy and to your email inbox. Enabled services receive the same event messages, including this PC's name.</p>
+      <p class="lead">Switch a service on with its switch; click its name for its settings. Enabled services receive the same event messages, including this PC's name.</p>
 
-      <div class="card">
-        <label class="switch-row">
-          <span><strong>ntfy (phone push)</strong><br><span class="muted small">Receive office alerts without linking a WhatsApp number. Add personal and group topics below, then subscribe to the appropriate topics in the <b>ntfy</b> phone app. Your server or plan may have delivery limits.</span></span>
-          <input type="checkbox" class="switch" id="nt-ntfy-on">
-        </label>
-        <div class="chips" id="nt-ntfy-topics"></div>
-        <div class="row">
-          <label for="nt-ntfy-topic">Add topic</label>
-          <input type="text" id="nt-ntfy-topic" class="grow" placeholder="e.g. av-studio-render-x7k2p9">
-          <button class="btn" id="nt-ntfy-add">+ Add</button>
-          <button class="btn" id="nt-ntfy-gen">Generate random topic</button>
-        </div>
-        <p class="muted small">Switch a topic on or off without removing it. Open Alerts to choose which enabled notification types go there. Click the topic name to copy it; ✕ removes it. For an unprotected topic, anyone who knows its name can read the alerts.</p>
-        <details class="more">
-          <summary class="muted small">Own ntfy server or access token (optional)</summary>
+      <div class="card services">
+        <div class="svc" id="nt-ntfy-svc">
+          <div class="svc-head">
+            <button class="svc-toggle" aria-expanded="false"><span class="chev">▸</span><strong>ntfy (phone push)</strong><span class="muted small svc-sum" id="nt-ntfy-sum"></span></button>
+            <input type="checkbox" class="switch" id="nt-ntfy-on" title="On / off">
+          </div>
+          <div class="svc-body hidden">
+            <p class="muted small">Receive office alerts without linking a WhatsApp number. Add personal and group topics below, then subscribe to the appropriate topics in the <b>ntfy</b> phone app. Your server or plan may have delivery limits.</p>
+          <div class="chips" id="nt-ntfy-topics"></div>
           <div class="row">
-            <label for="nt-ntfy-server">Server</label>
-            <input type="text" id="nt-ntfy-server" class="grow" placeholder="https://ntfy.sh">
+            <label for="nt-ntfy-topic">Add topic</label>
+            <input type="text" id="nt-ntfy-topic" class="grow" placeholder="e.g. av-studio-render-x7k2p9">
+            <button class="btn" id="nt-ntfy-add">+ Add</button>
+            <button class="btn" id="nt-ntfy-gen">Generate random topic</button>
+          </div>
+          <p class="muted small">Switch a topic on or off without removing it. Open Alerts to choose which enabled notification types go there. Click the topic name to copy it; ✕ removes it. For an unprotected topic, anyone who knows its name can read the alerts.</p>
+          <details class="more">
+            <summary class="muted small">Own ntfy server or access token (optional)</summary>
+            <div class="row">
+              <label for="nt-ntfy-server">Server</label>
+              <input type="text" id="nt-ntfy-server" class="grow" placeholder="https://ntfy.sh">
+            </div>
+            <div class="row">
+              <label for="nt-ntfy-token">Access token</label>
+              <input type="password" id="nt-ntfy-token" class="grow" placeholder="Only for a protected topic">
+              <button class="btn" id="nt-ntfy-save">Save token</button>
+              <span class="pill" id="nt-ntfy-has"></span>
+            </div>
+          </details>
+          <div class="row"><button class="btn" id="nt-ntfy-test">Test ntfy only</button></div>
+          </div>
+        </div>
+
+        <div class="svc" id="nt-email-svc">
+          <div class="svc-head">
+            <button class="svc-toggle" aria-expanded="false"><span class="chev">▸</span><strong>Email (Gmail sender)</strong><span class="muted small svc-sum" id="nt-email-sum"></span></button>
+            <input type="checkbox" class="switch" id="nt-email-on" title="On / off">
+          </div>
+          <div class="svc-body hidden">
+            <p class="muted small">Send from Gmail to your Gmail, office address, or several recipients. The receiving office account needs no setup.</p>
+          <div class="row">
+            <label for="nt-email-user">Gmail address</label>
+            <input type="email" id="nt-email-user" class="grow" placeholder="yourname@gmail.com">
           </div>
           <div class="row">
-            <label for="nt-ntfy-token">Access token</label>
-            <input type="password" id="nt-ntfy-token" class="grow" placeholder="Only for a protected topic">
-            <button class="btn" id="nt-ntfy-save">Save token</button>
-            <span class="pill" id="nt-ntfy-has"></span>
+            <label for="nt-email-password">App Password</label>
+            <input type="password" id="nt-email-password" class="grow" autocomplete="new-password" placeholder="Google App Password (not your Gmail password)">
+            <button class="btn" id="nt-email-save">Save password</button>
+            <button class="btn" id="nt-email-clear">Remove password</button>
+            <span class="pill" id="nt-email-has"></span>
           </div>
-        </details>
-        <div class="row"><button class="btn" id="nt-ntfy-test">Test ntfy only</button></div>
-      </div>
+          <p class="muted small">In your Google Account, enable <b>2-Step Verification</b>, then create an <b>App Password</b> named AV PostPilot. Enter it here. If App Passwords is unavailable for your account, this Gmail setup cannot be used. Changing your Google password revokes App Passwords.</p>
+          <div class="chips" id="nt-email-targets"></div>
+          <div class="row">
+            <label for="nt-email-recipients">Add recipient</label>
+            <input type="text" id="nt-email-recipients" class="grow" placeholder="you@gmail.com, you@office.com">
+            <button class="btn" id="nt-email-add">+ Add</button>
+          </div>
+          <p class="muted small">Switch recipients on or off without removing them. Open Alerts to choose their notification types; ✕ removes them. Add several addresses separated by commas. The first event line is the subject; the full message is the body.</p>
+          <div class="row"><button class="btn" id="nt-email-test">Test email only</button></div>
+          </div>
+        </div>
 
-      <div class="card">
-        <label class="switch-row">
-          <span><strong>Email (Gmail sender)</strong><br><span class="muted small">Send from Gmail to your Gmail, office address, or several recipients. The receiving office account needs no setup.</span></span>
-          <input type="checkbox" class="switch" id="nt-email-on">
-        </label>
-        <div class="row">
-          <label for="nt-email-user">Gmail address</label>
-          <input type="email" id="nt-email-user" class="grow" placeholder="yourname@gmail.com">
+        <div class="svc" id="nt-tg-svc">
+          <div class="svc-head">
+            <button class="svc-toggle" aria-expanded="false"><span class="chev">▸</span><strong>Telegram</strong><span class="muted small svc-sum" id="nt-tg-sum"></span></button>
+            <input type="checkbox" class="switch" id="nt-tg-on" title="On / off">
+          </div>
+          <div class="svc-body hidden">
+            <p class="muted small">Free. Create a bot with <b>@BotFather</b> (send /newbot), paste its token here.</p>
+          <div class="row">
+            <label for="nt-tg-token">Bot token</label>
+            <input type="password" id="nt-tg-token" class="grow" placeholder="123456789:AA…">
+            <button class="btn" id="nt-tg-save">Save token</button>
+            <span class="pill" id="nt-tg-has"></span>
+          </div>
+          <p class="muted small">Then: each person sends any message to the bot, or add the bot to your group and post a message there. Click <b>Find chats</b>.</p>
+          <div class="row"><button class="btn" id="nt-tg-find">Find chats</button></div>
+          <div class="chatlist" id="nt-tg-chats"></div>
+          </div>
         </div>
-        <div class="row">
-          <label for="nt-email-password">App Password</label>
-          <input type="password" id="nt-email-password" class="grow" autocomplete="new-password" placeholder="Google App Password (not your Gmail password)">
-          <button class="btn" id="nt-email-save">Save password</button>
-          <button class="btn" id="nt-email-clear">Remove password</button>
-          <span class="pill" id="nt-email-has"></span>
-        </div>
-        <p class="muted small">In your Google Account, enable <b>2-Step Verification</b>, then create an <b>App Password</b> named AV PostPilot. Enter it here. If App Passwords is unavailable for your account, this Gmail setup cannot be used. Changing your Google password revokes App Passwords.</p>
-        <div class="chips" id="nt-email-targets"></div>
-        <div class="row">
-          <label for="nt-email-recipients">Add recipient</label>
-          <input type="text" id="nt-email-recipients" class="grow" placeholder="you@gmail.com, you@office.com">
-          <button class="btn" id="nt-email-add">+ Add</button>
-        </div>
-        <p class="muted small">Switch recipients on or off without removing them. Open Alerts to choose their notification types; ✕ removes them. Add several addresses separated by commas. The first event line is the subject; the full message is the body.</p>
-        <div class="row"><button class="btn" id="nt-email-test">Test email only</button></div>
-      </div>
 
-      <div class="card">
-        <label class="switch-row">
-          <span><strong>Telegram</strong><br><span class="muted small">Free. Create a bot with <b>@BotFather</b> (send /newbot), paste its token here.</span></span>
-          <input type="checkbox" class="switch" id="nt-tg-on">
-        </label>
-        <div class="row">
-          <label for="nt-tg-token">Bot token</label>
-          <input type="password" id="nt-tg-token" class="grow" placeholder="123456789:AA…">
-          <button class="btn" id="nt-tg-save">Save token</button>
-          <span class="pill" id="nt-tg-has"></span>
+        <div class="svc" id="nt-wa-svc">
+          <div class="svc-head">
+            <button class="svc-toggle" aria-expanded="false"><span class="chev">▸</span><strong>WhatsApp (Whapi.Cloud)</strong><span class="muted small svc-sum" id="nt-wa-sum"></span></button>
+            <input type="checkbox" class="switch" id="nt-wa-on" title="On / off">
+          </div>
+          <div class="svc-body hidden">
+            <p class="muted small">Requires linking a WhatsApp account. Do not link your primary number for office automation; providers cannot guarantee protection from account restrictions. Use ntfy or Telegram above to avoid linking WhatsApp. This integration does not use Meta's official Cloud API.</p>
+          <div class="row">
+            <label for="nt-wa-token">API token</label>
+            <input type="password" id="nt-wa-token" class="grow" placeholder="Whapi channel token">
+            <button class="btn" id="nt-wa-save">Save token</button>
+            <span class="pill" id="nt-wa-has"></span>
+          </div>
+          <div class="row">
+            <button class="btn" id="nt-wa-find">Load my groups</button>
+            <input type="text" id="nt-wa-phone" placeholder="or a number: 919876543210">
+            <input type="text" id="nt-wa-phone-name" placeholder="name">
+            <button class="btn" id="nt-wa-add">Add number</button>
+          </div>
+          <div class="chatlist" id="nt-wa-chats"></div>
+          </div>
         </div>
-        <p class="muted small">Then: each person sends any message to the bot, or add the bot to your group and post a message there. Click <b>Find chats</b>.</p>
-        <div class="row"><button class="btn" id="nt-tg-find">Find chats</button></div>
-        <div class="chatlist" id="nt-tg-chats"></div>
-      </div>
-
-      <div class="card">
-        <label class="switch-row">
-          <span><strong>WhatsApp (Whapi.Cloud)</strong><br><span class="muted small">Requires linking a WhatsApp account. Do not link your primary number for office automation; providers cannot guarantee protection from account restrictions. Use ntfy or Telegram above to avoid linking WhatsApp. This integration does not use Meta's official Cloud API.</span></span>
-          <input type="checkbox" class="switch" id="nt-wa-on">
-        </label>
-        <div class="row">
-          <label for="nt-wa-token">API token</label>
-          <input type="password" id="nt-wa-token" class="grow" placeholder="Whapi channel token">
-          <button class="btn" id="nt-wa-save">Save token</button>
-          <span class="pill" id="nt-wa-has"></span>
-        </div>
-        <div class="row">
-          <button class="btn" id="nt-wa-find">Load my groups</button>
-          <input type="text" id="nt-wa-phone" placeholder="or a number: 919876543210">
-          <input type="text" id="nt-wa-phone-name" placeholder="name">
-          <button class="btn" id="nt-wa-add">Add number</button>
-        </div>
-        <div class="chatlist" id="nt-wa-chats"></div>
       </div>
 
       <div class="card">

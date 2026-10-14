@@ -268,3 +268,13 @@ table.enc { width: 100%; border-collapse: collapse; margin-top: 10px; table-layo
 .toast.bad { border-left-color: var(--bad); }
 details.more { margin-top: 6px; }
 details.more summary { cursor: pointer; padding: 4px 0; }
+/* Notifications: one line per service, settings open on click */
+.services { padding: 4px 18px; }
+.svc + .svc { border-top: 1px solid var(--line); }
+.svc-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 0; }
+.svc-toggle { flex: 1; display: flex; align-items: center; gap: 10px; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; padding: 0; min-width: 0; }
+.svc-toggle .chev { color: var(--muted); width: 12px; transition: transform .15s; }
+.svc.open .chev { transform: rotate(90deg); }
+.svc-sum { margin-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.svc-body { padding: 0 0 14px 22px; }
+.svc-body > p:first-child { margin-top: 0; }

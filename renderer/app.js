@@ -112,6 +112,33 @@ function renderDashboard() {
         <td><span class="bar"><i style="width:${pct}%"></i></span>${esc(j.status || '')} ${j.status === 'Rendering' ? `${pct}%` : ''}</td></tr>`;
     }).join('')
     : `<tr><td colspan="4" class="muted">${status.connected ? 'No render jobs in this project' : '—'}</td></tr>`;
+
+  const sceneLabels = { waiting: 'Waiting', running: 'Detecting…', done: 'Done', failed: 'Failed' };
+  $('d-scene').innerHTML = scene.items.length
+    ? scene.items.map((it) => `<tr><td>${esc(it.name)}</td>
+        <td><span class="state ${it.state}">${sceneLabels[it.state] || esc(it.state)}</span></td>
+        <td class="muted small">${it.state === 'done' ? `${it.cuts} cut(s) · ${fmtSec(it.seconds)}` : it.state === 'running' ? `started ${time(it.startedAt)}` : esc(it.error || '')}</td></tr>`).join('')
+    : '<tr><td colspan="3" class="muted">Nothing queued</td></tr>';
+
+  // Same clips the Stabilization page counts as queued or run.
+  const stClips = typeof st === 'undefined' ? [] : st.clips.filter((c) => c.startedAt || c.elapsedMs || c.status === 'Waiting' || c.copyTimelineId);
+  $('d-stab').innerHTML = stClips.length
+    ? stClips.map((c) => {
+      const pct = c.status === 'Tracking' ? Math.round(c.percent || 0) : null;
+      const cls = c.approved || c.status === 'Passed' ? 'done' : /fail|error/i.test(c.status) ? 'failed' : st.running && st.current === c.key ? 'running' : '';
+      return `<tr><td>${esc(c.timelineName || '')}</td><td>${esc(c.marker)} · ${esc(c.name)}</td>
+        <td>${pct != null ? `<span class="bar"><i style="width:${pct}%"></i></span>` : ''}<span class="state ${cls}">${esc(c.approved ? 'Applied' : c.status)}</span>${pct != null ? ` ${pct}%` : ''}</td></tr>`;
+    }).join('')
+    : '<tr><td colspan="3" class="muted">Nothing queued</td></tr>';
+
+  // Only the queues that are running (or have work waiting) get a card.
+  const active = {
+    'd-render-card': Boolean(status.rendering),
+    'd-scene-card': scene.running || scene.items.some((it) => it.state === 'waiting'),
+    'd-stab-card': typeof st !== 'undefined' && (st.running || st.clips.some((c) => c.status === 'Waiting')),
+  };
+  for (const [id, on] of Object.entries(active)) $(id).classList.toggle('hidden', !on);
+  $('d-idle-card').classList.toggle('hidden', Object.values(active).some(Boolean));
 }
 
 // ------------------------------------------------------------------ log
@@ -796,14 +823,22 @@ function renderShutdown() {
     $('d-shutdown-sub').textContent = shutdownReason === 'manual' ? 'Started by hand' : `Because the ${shutdownReason}`;
     return;
   }
-  // Not counting down: show what's planned.
-  const plan = [];
-  if (settings.renders.afterQueue === 'shutdown') plan.push(`after renders${settings.renders.hd.enabled ? ' + HD review' : ''} (${fmtCountdown(settings.renders.shutdownSeconds)} countdown)`);
-  if (settings.encoder.afterQueue === 'shutdown') plan.push(`after the encoder queue (${fmtCountdown(settings.encoder.shutdownSeconds)} countdown)`);
-  if (settings.stab?.afterQueue === 'shutdown') plan.push(`after the stabilization queue (${fmtCountdown(settings.stab.shutdownSeconds)} countdown)`);
-  if (settings.scene.afterQueue === 'shutdown') plan.push(`after the scene cut queue (${fmtCountdown(settings.scene.shutdownSeconds)} countdown)`);
+  // Not counting down: only what is running now, with the choice on its own page.
+  const running = [
+    ['renders', status.rendering, `rendering${settings.renders.hd.enabled ? ' (+ HD review)' : ''}`],
+    ['scene', scene.running, 'scene cuts'],
+    ['stab', typeof st !== 'undefined' && st.running, 'stabilization'],
+    ['encoder', enc.running, 'encoding'],
+  ].filter(([, on]) => on);
+  const choice = { silent: 'do nothing', nothing: 'just notify', shutdown: 'shut down' };
+  const plan = running.filter(([g]) => settings[g]?.afterQueue === 'shutdown')
+    .map(([g, , what]) => `${fmtCountdown(settings[g].shutdownSeconds)} after ${what}`);
+  const rest = running.filter(([g]) => settings[g]?.afterQueue !== 'shutdown')
+    .map(([g, , what]) => `${what[0].toUpperCase()}${what.slice(1)}: ${choice[settings[g]?.afterQueue] || 'just notify'}`);
   $('d-shutdown').textContent = plan.length ? 'Planned' : 'Not planned';
-  $('d-shutdown-sub').textContent = plan.length ? `Shuts down ${plan.join(' and ')}` : 'Choose "shut down" on the Renders or Scene Cuts page';
+  $('d-shutdown-sub').textContent = plan.length
+    ? [`Shuts down ${plan.join(' and ')}`, ...rest].join(' · ')
+    : running.length ? `${rest.join(' · ')} (no shutdown)` : 'Nothing running';
 }
 $('shutdown-cancel').addEventListener('click', () => pilot.shutdownCancel());
 $('d-shutdown-cancel').addEventListener('click', () => pilot.shutdownCancel());
@@ -850,7 +885,25 @@ async function renderNotify() {
   renderChats('whapi', 'nt-wa-chats');
   $('nt-events').innerHTML = EVENTS.map(([k, label]) =>
     `<label class="check"><input type="checkbox" data-ev="${k}" ${n.events[k] ? 'checked' : ''}> ${label}</label>`).join('');
+
+  // One-line summary next to each service name.
+  const count = (list, word) => `${list.length} ${word}${list.length === 1 ? '' : 's'}`;
+  const on = (kind, list) => list.filter((v) => n[kind].targets?.[v]?.enabled !== false);
+  const topics = ntfyTopicList(), recipients = n.email.recipients || [];
+  const sums = {
+    'nt-ntfy-sum': topics.length ? `${count(on('ntfy', topics), 'topic')} on${topics.length > on('ntfy', topics).length ? ` of ${topics.length}` : ''}` : 'No topics',
+    'nt-email-sum': !n.email.user || !has.email ? 'Not set up' : recipients.length ? `${n.email.user} → ${count(on('email', recipients), 'recipient')}` : `${n.email.user} · no recipients`,
+    'nt-tg-sum': !has.telegram ? 'Not set up' : count(n.telegram.chats, 'chat'),
+    'nt-wa-sum': !has.whapi ? 'Not set up' : count(n.whapi.chats, 'chat'),
+  };
+  for (const [id, text] of Object.entries(sums)) $(id).textContent = text;
 }
+document.querySelectorAll('.svc-toggle').forEach((b) => b.addEventListener('click', () => {
+  const body = b.closest('.svc').querySelector('.svc-body');
+  const open = body.classList.toggle('hidden') === false;
+  b.setAttribute('aria-expanded', String(open));
+  b.closest('.svc').classList.toggle('open', open);
+}));
 
 const found = { telegram: [], whapi: [] };
 function renderChats(kind, el) {
