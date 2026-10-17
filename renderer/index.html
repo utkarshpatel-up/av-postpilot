@@ -30,6 +30,8 @@
         <svg viewBox="0 0 24 24"><path d="M4 4h16v12H4zm-2 14h20v2H2zM10 7v6l5-3z"/></svg>Renders</button>
       <button class="nav" data-page="encoder">
         <svg viewBox="0 0 24 24"><path d="M4 5h16v2H4zm0 4h10v2H4zm0 4h10v2H4zm0 4h16v2H4zm12-8 6 4-6 4z"/></svg>Encoder<span class="soon hidden" id="nav-enc-badge"></span></button>
+      <button class="nav" data-page="night">
+        <svg viewBox="0 0 24 24"><path d="M12.3 2a8 8 0 1 0 9.7 9.7A7 7 0 0 1 12.3 2zM18 2l.7 1.8L20.5 4.5l-1.8.7L18 7l-.7-1.8-1.8-.7 1.8-.7z"/></svg>Night Queue<span class="soon hidden" id="nav-night-badge"></span></button>
       <button class="nav" data-page="notify">
         <svg viewBox="0 0 24 24"><path d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6V11a6 6 0 0 0-5-5.9V4a1 1 0 0 0-2 0v1.1A6 6 0 0 0 6 11v5l-2 2v1h16v-1z"/></svg>Notifications</button>
       <button class="nav" data-page="librarybackup">
@@ -112,6 +114,11 @@
       </div>
 
       <div class="card" id="d-idle-card"><div class="card-label">Queues</div><div class="muted">Nothing rendering, cutting scenes or stabilizing right now.</div></div>
+
+      <div class="card hidden" id="d-night-card">
+        <div class="card-head"><div class="card-label">Night queue</div><button class="link" data-goto="night">Night Queue</button></div>
+        <div id="d-night"></div>
+      </div>
 
       <div class="card hidden" id="d-render-card">
         <div class="card-head"><div class="card-label">Render queue</div><button class="link" data-goto="renders">Render settings</button></div>
@@ -483,6 +490,56 @@
     </section>
 
     <!-- ================================================= Notifications -->
+    <section class="page" id="page-night">
+      <h1>Night Queue</h1>
+      <p class="lead">Scene cuts, stabilization, renders and encoding one after another, unattended, with one choice for when everything has finished. Stabilization only makes the stabilized copies: nothing is applied to your timelines until you review it on the Stabilization page.</p>
+
+      <div class="card">
+        <div class="card-head">
+          <div class="card-label">Add a step · <span id="n-project">—</span></div>
+          <button class="btn" id="n-refresh">Refresh lists</button>
+        </div>
+        <div class="row">
+          <label for="n-type">Step</label>
+          <select id="n-type">
+            <option value="scene">Scene cuts on timelines</option>
+            <option value="stab">Stabilize marked clips</option>
+            <option value="render">Render jobs from Resolve's render queue</option>
+            <option value="encode">Encoder queue (files waiting on the Encoder page)</option>
+          </select>
+          <span id="n-color-box" class="hidden"><label for="n-color">Marker color</label> <select id="n-color"><option value="All">All colors</option></select></span>
+        </div>
+        <div class="tl-list" id="n-pick"><div class="empty">Click "Refresh lists"</div></div>
+        <div class="row">
+          <button class="btn" id="n-add">Add step</button>
+          <span class="muted small" id="n-pick-info"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div class="card-label">Steps</div>
+          <button class="btn" id="n-clear">Clear finished</button>
+        </div>
+        <div id="n-steps"><div class="empty">No steps yet</div></div>
+        <div class="row">
+          <label for="n-after">When everything finishes</label>
+          <select id="n-after">
+            <option value="silent">Do nothing</option><option value="nothing">Just notify</option>
+            <option value="shutdown">Notify and shut down this PC</option>
+          </select>
+          <span class="countdown" data-for="night">after
+            <input type="number" class="cd-min" min="0" max="1440"> min
+            <input type="number" class="cd-sec" min="0" max="59"> s</span>
+        </div>
+        <div class="row">
+          <button class="btn primary" id="n-start">Start night queue</button>
+          <button class="btn" id="n-stop">Stop after current step</button>
+        </div>
+        <p class="muted small">While it runs, the after-queue choices on the Scene Cuts, Stabilization, Renders and Encoder pages are not used; only the one above. A failed step is reported and the next step runs. If someone stops a render in Resolve, the queue stops and the PC stays on. Encoding closes the project, so it is always the last step.</p>
+      </div>
+    </section>
+
     <section class="page" id="page-notify">
       <h1>Notifications</h1>
       <p class="lead">Switch a service on with its switch; click its name for its settings. Enabled services receive the same event messages, including this PC's name.</p>
@@ -688,6 +745,7 @@
   <script src="app.js"></script>
   <script src="stabilization.js"></script>
   <script src="premiere.js"></script>
+  <script src="night.js"></script>
 </body>
 </html>
 

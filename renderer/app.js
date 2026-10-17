@@ -52,6 +52,7 @@ function go(page) {
   if (page === 'renders') renderRendersForm();
   if (page === 'encoder' && !presets.length && status.connected) loadPresets(true);
   if (page === 'scene' && status.connected && status.project) loadSceneTimelines();
+  if (page === 'night' && typeof nLoadLists === 'function') nLoadLists();
   if (page === 'episodes') {
     $('e-project').textContent = status.project?.name || 'no project open';
     if (status.connected && status.project) loadSeries();
@@ -137,6 +138,13 @@ function renderDashboard() {
     'd-scene-card': scene.running || scene.items.some((it) => it.state === 'waiting'),
     'd-stab-card': typeof st !== 'undefined' && (st.running || st.clips.some((c) => c.status === 'Waiting')),
   };
+  const nightOn = typeof nq !== 'undefined' && nq.running;
+  if (nightOn) {
+    const i = nq.steps.findIndex((s) => s.state === 'running');
+    const todo = nq.steps.filter((s) => s.state === 'waiting' || s.state === 'running');
+    $('d-night').innerHTML = `<div class="muted small">${todo.map((s) => `${s.state === 'running' ? '<b>▶ ' : ''}${N_TYPES[s.type]}${s.state === 'running' ? '</b>' : ''}`).join(' → ')}${i >= 0 ? ` · step ${i + 1} of ${nq.steps.length}` : ''}</div>`;
+  }
+  active['d-night-card'] = nightOn;
   for (const [id, on] of Object.entries(active)) $(id).classList.toggle('hidden', !on);
   $('d-idle-card').classList.toggle('hidden', Object.values(active).some(Boolean));
 }
@@ -718,6 +726,7 @@ function renderRendersForm() {
   $('s-after').value = settings.scene.afterQueue;
   $('st-after').value = settings.stab.afterQueue; $('st-remove-markers').checked = Boolean(settings.stab.removeMarkers);
   $('enc-after').value = settings.encoder.afterQueue;
+  $('n-after').value = settings.night.afterQueue;
   renderCountdowns();
   renderShutdown();
   const hd = r.hd;
@@ -780,7 +789,7 @@ function renderCountdowns() {
     const secs = settings[group].shutdownSeconds;
     el.querySelector('.cd-min').value = Math.floor(secs / 60);
     el.querySelector('.cd-sec').value = secs % 60;
-    const select = { scene: $('s-after'), renders: $('rn-after'), encoder: $('enc-after'), stab: $('st-after') }[group];   // manual: always shown
+    const select = { scene: $('s-after'), renders: $('rn-after'), encoder: $('enc-after'), stab: $('st-after'), night: $('n-after') }[group];   // manual: always shown
     el.classList.toggle('hidden', Boolean(select) && select.value !== 'shutdown');
   });
 }
@@ -824,7 +833,9 @@ function renderShutdown() {
     return;
   }
   // Not counting down: only what is running now, with the choice on its own page.
-  const running = [
+  // While the night queue runs, only its own choice counts.
+  const nightOn = typeof nq !== 'undefined' && nq.running;
+  const running = nightOn ? [['night', true, 'the night queue']] : [
     ['renders', status.rendering, `rendering${settings.renders.hd.enabled ? ' (+ HD review)' : ''}`],
     ['scene', scene.running, 'scene cuts'],
     ['stab', typeof st !== 'undefined' && st.running, 'stabilization'],
@@ -854,6 +865,7 @@ const EVENTS = [
   ['encoderGroupDone', 'An encoder group finishes'],
   ['encoderQueueDone', 'The encoder queue finishes'],
   ['stabQueueDone', 'The stabilization queue finishes'],
+  ['nightQueueDone', 'The night queue finishes'],
   ['shutdown', 'The PC is about to shut down'],
   ['autosaveFailed', 'Auto-save has a problem (e.g. NAS offline)'],
   ['projectCreated', 'A new project is created'],
@@ -1526,6 +1538,7 @@ setInterval(() => { if (settings && $('page-librarybackup').classList.contains('
       lastProject = key;
       $('e-project').textContent = s.project?.name || 'no project open';
       renderNewProject();
+      if ($('page-night').classList.contains('active') && typeof nLoadLists === 'function') nLoadLists();
     }
   });
   pilot.onProjectProgress((p) => {

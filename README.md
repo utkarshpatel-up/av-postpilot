@@ -5,8 +5,16 @@ backup server can be a Mac). It talks to Resolve through Resolve's own script ru
 (`fuscript.exe` + `electron/bridge.lua`), so the editing PCs need nothing extra
 installed: no Python.
 
-**Current version: 3.1.0** — downloads in `dist/`: Windows installer, Windows portable
+**Current version: 3.2.0** — downloads in `dist/`: Windows installer, Windows portable
 ZIP, macOS ZIPs for Apple Silicon (arm64) and Intel (x64), plus SHA-256 checksums.
+
+## New in 3.2
+- **Night Queue**: scene cuts, stabilization, renders and encoding as steps that run
+  one after another, with one choice for when everything has finished.
+- **Dashboard**: the Shutdown card shows only what is running now and its real
+  after-queue choice; scene cut, stabilization and night queues appear while active.
+- **Notifications**: one line per service; click a service for its settings.
+- Sidebar order ends with Notifications, Library Backup, Settings, Activity.
 
 ## New in 3.1
 - **Premiere Import page**: brings a whole Premiere Pro project into Resolve.
@@ -46,6 +54,7 @@ ZIP, macOS ZIPs for Apple Silicon (arm64) and Intel (x64), plus SHA-256 checksum
 | **Stabilization** | Stabilizes marked shaky clips on one or more timelines: Fusion tracking on rigid details (Lock, or Smooth when the camera moves on purpose), Resolve's stabilizer when there is no rigid reference, edge zoom, review/approve onto your timeline, delete approved copies |
 | **Episodes** | Creates episode series with a Text+ title (plain or on colour bars) followed by 5 s of black; renames a series later (the `(…)` cue never changes) |
 | **Renders** | Copies each finished render, optional HD review pass (one temporary timeline, individual clips, cleaned up afterwards), shutdown with countdown |
+| **Night Queue** | Steps in order (scene cuts, stabilization, render jobs, Encoder queue), unattended, one finish choice |
 | **Encoder** | Media-Encoder-style queue with Resolve presets in a disposable project; optional copy of finished files |
 | **Clip Info** (window) | Always-on-top box with the clip under the playhead; Settings switch, tray, Ctrl+Alt+I |
 | **Notifications** | ntfy phone push, Gmail email to personal/office recipients, Telegram and legacy WhatsApp (Whapi.Cloud) |
@@ -203,6 +212,25 @@ Developers: the helper's source is `cep/postpilot-link`; `node dev/sign_link.js`
 it with `dev/tools/ZXPSignCmd.exe` and the self-signed certificate in `dev/tools` (not in
 git — keep a copy) and unpacks the signed copy into `electron/premiere-link`, which ships
 with the app (`.gitattributes` keeps its bytes exact).
+
+## Night Queue
+Add steps in the order they should run, then **Start night queue**:
+- **Scene cuts** on ticked timelines;
+- **Stabilize** marked clips on ticked timelines (one step; more timelines join it).
+  It only makes the stabilized copies, as on the Stabilization page: nothing is applied
+  to a timeline until someone reviews it there. The queue won't start while the last
+  stabilization still waits for review, because it would replace that list;
+- **Render** ticked jobs from Resolve's render queue (PostPilot starts them; copies and
+  the HD review pass from the Renders page still happen);
+- **Encode** whatever waits on the Encoder page. It closes the project, so it is always
+  the last step, and PostPilot asks for that when the queue is started.
+
+A render of a timeline that is also in the stabilization step is flagged with a caution
+(when adding it and when starting): that render uses the original, un-reviewed clips.
+While the queue runs, only its own **When everything finishes** choice counts; the
+modules' own choices are not used. A failed step is reported and the next one runs; a
+render stopped in Resolve stops the queue and the PC stays on. Steps are kept when
+PostPilot is closed.
 
 ## When a queue finishes (all modules)
 Scene Cuts, Renders, Encoder and Stabilization each have **When the queue finishes**:

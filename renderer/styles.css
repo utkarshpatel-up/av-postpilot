@@ -278,3 +278,12 @@ details.more summary { cursor: pointer; padding: 4px 0; }
 .svc-sum { margin-left: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .svc-body { padding: 0 0 14px 22px; }
 .svc-body > p:first-child { margin-top: 0; }
+/* Night queue steps */
+.n-step { display: grid; grid-template-columns: 28px 1fr 200px 110px; gap: 12px; align-items: start; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.n-step:last-child { border-bottom: 0; }
+.n-num { width: 24px; height: 24px; border-radius: 50%; background: var(--line); display: grid; place-items: center; font-size: 12px; font-weight: 600; }
+.n-step.running .n-num { background: var(--accent); color: #fff; }
+.n-main { min-width: 0; }
+.n-main .muted { word-break: break-word; }
+.n-warn { color: #ffb74d; margin-top: 4px; }
+.n-btns { display: flex; gap: 4px; justify-content: flex-end; }

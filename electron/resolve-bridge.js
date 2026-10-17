@@ -124,6 +124,7 @@ class ResolveBridge {
   encoderFinish(args) { return this.request(`encfinish\t${toLua(args)}`, 60000); }
   jobStatus(id, token) { return this.request(`jobstatus\t${toLua({ id, token })}`, 30000); }
   stopRendering() { return this.request('stoprender', 30000); }
+  startRendering(ids) { return this.request(`startrender	${toLua({ ids })}`, 60000); }
   hdCleanup(args) { return this.request(`hdcleanup\t${toLua(args)}`, 5 * 60 * 1000); }
   detectSceneCuts(name) { return this.request(`detect\t${toLua({ name })}`, 6 * 60 * 60 * 1000); }
   renameSeries(args) { return this.request(`rename\t${toLua(args)}`, 10 * 60 * 1000); }

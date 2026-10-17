@@ -127,7 +127,7 @@ local function status()
           dir = j.TargetDir, file = j.OutputFilename,
           width = j.FormatWidth, height = j.FormatHeight, markIn = j.MarkIn, markOut = j.MarkOut,
           status = s.JobStatus, percent = s.CompletionPercentage,
-          etaMs = s.EstimatedTimeRemainingInMs, tookMs = s.TimeTakenToRenderInMs,
+          etaMs = s.EstimatedTimeRemainingInMs, tookMs = s.TimeTakenToRenderInMs, error = s.Error,
         }
       end
     end)
@@ -632,6 +632,21 @@ local function jobstatus(a)
   return res
 end
 
+-- Night queue: start chosen jobs of the open project's render queue.
+local function startrender(a)
+  local _, p = project()
+  if not p then return { ok = false, error = 'No project open' } end
+  if p:IsRenderingInProgress() then return { ok = false, error = 'Resolve is already rendering' } end
+  local have, ids, missing = {}, {}, {}
+  for _, j in ipairs(p:GetRenderJobList() or {}) do have[j.JobId] = true end
+  for _, id in ipairs(a.ids or {}) do
+    if have[id] then ids[#ids + 1] = id else missing[#missing + 1] = id end
+  end
+  if #ids == 0 then return { ok = false, error = 'None of the chosen render jobs are in the render queue any more' } end
+  if not p:StartRendering(ids, false) then return { ok = false, error = 'Resolve did not start rendering' } end
+  return { ok = true, started = #ids, missing = #missing }
+end
+
 local function stoprender()
   local _, p = project()
   if p then p:StopRendering() end
@@ -649,7 +664,7 @@ while true do
   local cmd, arg = line:match('^%s*(%w+)\t?(.*)$')
   if cmd then
     local ok, res = pcall(function()
-      if encoderSession and (cmd == 'setup' or cmd == 'series' or cmd == 'rename' or cmd == 'detect' or cmd == 'hdbatch' or cmd == 'hdcleanup' or cmd == 'save' or cmd == 'export') then
+      if encoderSession and (cmd == 'setup' or cmd == 'series' or cmd == 'rename' or cmd == 'detect' or cmd == 'hdbatch' or cmd == 'hdcleanup' or cmd == 'save' or cmd == 'export' or cmd == 'startrender') then
         return { ok = false, error = 'Finish Encoder before modifying or backing up a project' }
       end
       if cmd == 'status' then return status()
@@ -678,6 +693,7 @@ while true do
       elseif cmd == 'encfinish' then return encfinish(parse(arg))
       elseif cmd == 'jobstatus' then return jobstatus(parse(arg))
       elseif cmd == 'stoprender' then return stoprender()
+      elseif cmd == 'startrender' then return startrender(parse(arg))
       else return { ok = false, error = 'unknown command: ' .. cmd } end
     end)
     if not ok then res = { ok = false, error = tostring(res) } end

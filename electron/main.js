@@ -12,6 +12,7 @@ setHttpFetch((url, options) => net.fetch(url, options));
 const { RenderWatcher, copyVerified } = require('./renders');
 const { collectHdFiles } = require('./hdreview');
 const { SceneQueue } = require('./scenequeue');
+const { NightQueue } = require('./nightqueue');
 const { Encoder } = require('./encoder');
 const { Stabilization } = require('./stabilization');
 const { createFrameGrabber } = require('./stabilization-frames');
@@ -63,6 +64,7 @@ const DEFAULTS = {
   manual: { shutdownSeconds: 60 },
   encoder: { afterQueue: 'nothing', shutdownSeconds: 60 },
   stab: { afterQueue: 'nothing', shutdownSeconds: 60, removeMarkers: false },
+  night: { afterQueue: 'nothing', shutdownSeconds: 60 },
   libraryBackup: libraryBackup.DEFAULTS,
   notify: {
     telegram: { enabled: false, chats: [] },
@@ -71,7 +73,7 @@ const DEFAULTS = {
     email: { enabled: false, user: '', recipients: [] },
     events: {
       renderDone: true, renderFailed: true, renderCopied: false, queueDone: true,
-      sceneDone: true, sceneQueueDone: true, encoderGroupDone: true, encoderQueueDone: true, stabQueueDone: true, shutdown: true, autosaveFailed: true, projectCreated: false,
+      sceneDone: true, sceneQueueDone: true, encoderGroupDone: true, encoderQueueDone: true, stabQueueDone: true, nightQueueDone: true, shutdown: true, autosaveFailed: true, projectCreated: false,
       libraryBackupDone: false, libraryBackupFailed: true, libraryAlert: true, libraryBackupOverdue: true,
     },
   },
@@ -101,6 +103,7 @@ function mergeSettings(s) {
     series: { ...DEFAULTS.series, ...(s.series || {}) },
     encoder: { ...DEFAULTS.encoder, ...(s.encoder || {}) },
     stab: { ...DEFAULTS.stab, ...(s.stab || {}) },
+    night: { ...DEFAULTS.night, ...(s.night || {}) },
     libraryBackup: { ...DEFAULTS.libraryBackup, ...(s.libraryBackup || {}) },
     manual: { ...DEFAULTS.manual, ...(s.shutdownSeconds ? { shutdownSeconds: s.shutdownSeconds } : {}), ...(s.manual || {}) },
     renders: { ...DEFAULTS.renders, ...(s.shutdownSeconds ? { shutdownSeconds: s.shutdownSeconds } : {}), ...(s.renders || {}), hd: { ...DEFAULTS.renders.hd, ...(s.renders?.hd || {}) } },
@@ -264,7 +267,7 @@ function setSecret(kind, value) {
 const notifier = new Notifier({ getSettings: () => settings, getSecret, log, pc: os.hostname() });
 // Per-module "Do nothing" (Scene Cuts, Renders, Encoder, Stabilization): that module's
 // messages are not sent at all. Failures (renderFailed) and shutdown warnings still are.
-const MODULE_EVENTS = { scene: ['sceneDone', 'sceneQueueDone'], renders: ['renderDone', 'queueDone', 'renderCopied'], encoder: ['encoderGroupDone', 'encoderQueueDone'], stab: ['stabQueueDone'] };
+const MODULE_EVENTS = { scene: ['sceneDone', 'sceneQueueDone'], renders: ['renderDone', 'queueDone', 'renderCopied'], encoder: ['encoderGroupDone', 'encoderQueueDone'], stab: ['stabQueueDone'], night: ['nightQueueDone'] };
 const sendNotice = notifier.notify.bind(notifier);
 notifier.notify = (event, ...rest) => {
   for (const [group, events] of Object.entries(MODULE_EVENTS)) if (events.includes(event) && settings[group]?.afterQueue === 'silent') return 0;
@@ -307,7 +310,9 @@ function cancelShutdown() {
 function sendShutdown() { send('shutdown', { at: shutdownAt, reason: shutdownReason }); }
 function afterQueue(action, what) {
   if (action !== 'shutdown') return;
-  const group = { 'scene cut queue': 'scene', 'encoder queue': 'encoder', 'stabilization queue': 'stab' }[what] || 'renders';
+  // While the night queue runs, only its own choice counts (at its end).
+  if (night?.running && what !== 'night queue') return;
+  const group = { 'scene cut queue': 'scene', 'encoder queue': 'encoder', 'stabilization queue': 'stab', 'night queue': 'night' }[what] || 'renders';
   const secs = countdown(settings[group].shutdownSeconds);
   scheduleShutdown(`${what} finished`, secs);
 }
@@ -363,7 +368,7 @@ const renders = new RenderWatcher({
 
 const encoder = new Encoder({
   confirmStart: async (project) => {
-    if (!project) return true;
+    if (!project || night?.running) return true;   // the night queue asked when it was started
     const result = await dialog.showMessageBox(win, {
       type: 'warning', title: 'Encode in a temporary project?',
       message: `Save and close "${project.name}" to start encoding?`,
@@ -406,6 +411,14 @@ const sceneQueue = new SceneQueue({
   bridge, notifier, log, getSettings: () => settings,
   onChange: () => { send('scene', sceneQueue.summary()); updateTray(); },
   onQueueDone: afterQueue,
+});
+
+const night = new NightQueue({
+  getStatus: () => status, sceneQueue, stabilization, encoder, renders, bridge, log, notifier,
+  loadState: () => state.night,
+  saveState: (n) => { state.night = n; writeJson(STATE_FILE, state); },
+  onChange: (n) => { send('night', n); updateTray(); },
+  onFinished: (stopped) => { if (!stopped) afterQueue(settings.night.afterQueue, 'night queue'); },
 });
 
 // Auto-save trouble (e.g. NAS offline): one message per problem, not every 15 minutes.
@@ -583,13 +596,14 @@ ipcMain.handle('library-backup', async (_e, action, options = {}) => {
 });
 ipcMain.handle('get-initial', () => ({
   settings, status, autosave: autosaver.summary(), log: logLines, platform: process.platform,
-  scene: sceneQueue.summary(), encoder: encoder.summary(), renders: renders.summary(), shutdownAt, shutdownReason,
+  scene: sceneQueue.summary(), encoder: encoder.summary(), night: night.summary(), renders: renders.summary(), shutdownAt, shutdownReason,
   pc: os.hostname(), version: app.getVersion(),
 }));
 ipcMain.handle('stabilize', async (_e, args) => {
   try {
     if (args.action === 'summary') return { ok: true, ...stabilization.summary() };
     if (args.action === 'stop') return stabilization.stop();
+    if (night.running) return { ok: false, error: 'The night queue is running' };
     if (encoder.running || sceneQueue.running || autosaver.running || shutdownAt) return { ok: false, error: 'Finish the current operation and cancel any planned shutdown first' };
     if (args.action === 'timelines') return await stabilization.timelines();
     if (args.action === 'scan') return await stabilization.scan(args.color, args.timelines || []);
@@ -767,6 +781,7 @@ ipcMain.handle('scene-add', (_e, names) => {
 ipcMain.handle('scene-remove', (_e, i) => sceneQueue.remove(i));
 ipcMain.handle('scene-clear', () => sceneQueue.clearFinished());
 ipcMain.handle('scene-start', () => {
+  if (night.running) return { ok: false, error: 'The night queue is running' };
   if (stabilization.running) return { ok: false, error: 'Finish stabilization first' };
   if (encoder.running) return { ok: false, error: 'Finish Encoder before starting scene cuts' };
   if (!status.connected) return { ok: false, error: 'Resolve is not connected' };
@@ -775,6 +790,41 @@ ipcMain.handle('scene-start', () => {
   return Promise.race([run, new Promise((r) => setTimeout(() => r({ ok: true, started: true }), 500))]);
 });
 ipcMain.handle('scene-stop', () => sceneQueue.stop());
+
+// ------------------------------------------------------------------ night queue
+ipcMain.handle('night', async (_e, { action, args = {} }) => {
+  try {
+    if (action === 'summary') return { ok: true, ...night.summary() };
+    if (action === 'conflicts') return { ok: true, timelines: night.conflicts(args.type, args) };
+    if (action === 'add') { night.add(status.project?.name, args.type, args); return { ok: true }; }
+    if (action === 'remove') { night.remove(args.id); return { ok: true }; }
+    if (action === 'move') { night.move(args.id, args.by); return { ok: true }; }
+    if (action === 'clear') { night.clearFinished(); return { ok: true }; }
+    if (action === 'stop') { night.stop(); return { ok: true }; }
+    if (action === 'start') {
+      if (!status.connected) return { ok: false, error: 'Resolve is not connected' };
+      if (sceneQueue.running || stabilization.running || encoder.running || autosaver.running) return { ok: false, error: 'Wait for the current operation to finish' };
+      if (status.rendering || renders.active || renders.settling || renders.hdBatch || renders.pendingCopies) return { ok: false, error: 'Wait for the current render to finish' };
+      if (shutdownAt) return { ok: false, error: 'Cancel the shutdown countdown first' };
+      const problem = night.check(status.project?.name);
+      if (problem) return { ok: false, error: problem };
+      // Ask now, while someone is at the PC: encoding saves and closes the project.
+      // (AVPP_SCREENSHOT + AVPP_YES: scripted developer checks answer yes)
+      if (night.steps.some((s) => s.type === 'encode' && s.state === 'waiting') && status.project && !(process.env.AVPP_SCREENSHOT && process.env.AVPP_YES)) {
+        const r = await dialog.showMessageBox(win, {
+          type: 'warning', title: 'Night queue with encoding',
+          message: `The last step encodes in a temporary project: "${status.project.name}" will be saved and closed then.`,
+          detail: 'PostPilot saves and closes your project when the Encoder step starts, encodes in a separate empty temporary project and deletes that project afterwards.',
+          buttons: ['Start the night queue', 'Cancel'], defaultId: 1, cancelId: 1,
+        });
+        if (r.response !== 0) return { ok: true, cancelled: true };
+      }
+      // Answer straight away: the queue runs for hours.
+      return Promise.race([night.start(), new Promise((r) => setTimeout(() => r({ ok: true, started: true }), 500))]);
+    }
+    return { ok: false, error: 'Unknown night queue action' };
+  } catch (err) { return { ok: false, error: err.message }; }
+});
 ipcMain.handle('shutdown-cancel', () => cancelShutdown());
 
 // ------------------------------------------------------------------ encoder
@@ -790,6 +840,7 @@ const ENC_ACTIONS = {
 };
 ipcMain.handle('encoder', async (_e, { action, args }) => {
   if (stabilization.running && action === 'start') return { ok: false, error: 'Finish stabilization first' };
+  if (night.running && action === 'start') return { ok: false, error: 'The night queue is running' };
   try {
     if (action === 'start') {
       if (!status.connected) return { ok: false, error: 'Connect to Resolve first' };
@@ -946,7 +997,16 @@ app.whenReady().then(async () => {
       if (process.env.AVPP_MAXIMIZE) { win.maximize(); await new Promise((r) => setTimeout(r, 800)); }
       // AVPP_EVAL_FILE: page code to run first (developer checks only)
       if (process.env.AVPP_EVAL_FILE) {
+        // AVPP_SNAP_SECONDS: also save a picture every n seconds while that code runs
+        let snap = 0;
+        const snaps = process.env.AVPP_SNAP_SECONDS && setInterval(async () => {
+          const file = path.join(process.env.AVPP_SCREENSHOT, `snap-${String(++snap).padStart(3, '0')}.png`);
+          win.webContents.invalidate();             // a window behind others doesn't repaint by itself
+          await new Promise((r) => setTimeout(r, 300));
+          fs.writeFileSync(file, (await win.webContents.capturePage()).toPNG());
+        }, Number(process.env.AVPP_SNAP_SECONDS) * 1000);
         const out = await win.webContents.executeJavaScript(fs.readFileSync(process.env.AVPP_EVAL_FILE, 'utf8')).catch((e) => `error: ${e.message}`);
+        if (snaps) clearInterval(snaps);
         fs.writeFileSync(path.join(process.env.AVPP_SCREENSHOT, 'eval-result.txt'), String(out));
       }
       for (const page of (process.env.AVPP_PAGES || 'dashboard,newproject,episodes,autosave').split(',')) {
