@@ -32,7 +32,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: AV-PostPilot-macOS
-          path: dist/AV-PostPilot-*-macOS-*.zip
+          path: dist/AV-PostPilot-*-macOS-*.dmg
           if-no-files-found: error
           # Download the build right after it finishes. Storage is billed for as
           # long as it's kept, and the free plan includes only 0.5 GB.

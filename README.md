@@ -6,7 +6,7 @@ backup server can be a Mac). It talks to Resolve through Resolve's own script ru
 installed: no Python.
 
 **Current version: 3.2.0** — downloads in `dist/`: Windows installer, Windows portable
-ZIP, macOS ZIPs for Apple Silicon (arm64) and Intel (x64), plus SHA-256 checksums.
+ZIP, macOS DMGs for Apple Silicon (arm64) and Intel (x64), plus SHA-256 checksums.
 
 ## New in 3.2
 - **Night Queue**: scene cuts, stabilization, renders and encoding as steps that run
@@ -76,7 +76,7 @@ npm start          # run the app
 npm test           # unit tests (no Resolve needed)
 npm run dist:win   # build the Windows installer into dist/
 npm run dist:zip   # build the complete extract-and-run Windows ZIP into dist/
-npm run dist:mac   # macOS ZIPs (on a Mac, or automatically by GitHub Actions on push)
+npm run dist:mac   # macOS DMGs (on a Mac, or automatically by GitHub Actions on push)
 ```
 The ZIP includes Electron and all app dependencies; target PCs do not need Node.js,
 npm or Python. Resolve Studio must already be installed, with local scripting enabled.
@@ -383,8 +383,8 @@ check can report up to about an hour after the age threshold passes.
 
 Run `npm ci` then `npm run dist:mac` **on a Mac**, or run the repository's
 **Build macOS distributions** GitHub Actions workflow. It produces separate Intel
-(`x64`) and Apple Silicon (`arm64`) ZIPs containing `AV PostPilot.app`, including the
-PostPilot backup engine. Extract and open the matching app; no PostgreSQL tools are bundled.
+(`x64`) and Apple Silicon (`arm64`) DMGs containing `AV PostPilot.app`, including the
+PostPilot backup engine. Open the matching DMG and drag the app to Applications; no PostgreSQL tools are bundled.
 Mac starts with automatic Resolve launch disabled, suitable for the library server.
 The build uses an ad-hoc signature, not Apple Developer ID signing/notarization;
 macOS may require approval in Privacy & Security. Windows cannot build this macOS
