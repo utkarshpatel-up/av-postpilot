@@ -34,3 +34,6 @@ jobs:
           name: AV-PostPilot-macOS
           path: dist/AV-PostPilot-*-macOS-*.zip
           if-no-files-found: error
+          # Download the build right after it finishes. Storage is billed for as
+          # long as it's kept, and the free plan includes only 0.5 GB.
+          retention-days: 7
