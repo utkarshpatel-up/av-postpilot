@@ -16,6 +16,15 @@ return function(connect, array)
     end
     return n
   end
+  -- Resolve never deletes a clip's last composition (DeleteFusionCompByName returns false):
+  -- add an empty one first, then remove the others. Leaves no effect on the clip.
+  local function clearComps(it)
+    local old=it:GetFusionCompNameList() or {}
+    if #old==0 then return end
+    assert(it:AddFusionComp(),'Could not reset the Fusion effect')
+    for _,name in ipairs(old) do it:DeleteFusionCompByName(name) end
+    assert(realComps(it)==0,'Could not remove the Fusion effect; remove it by hand')
+  end
   local function findTimeline(p,id)
     for i=1,p:GetTimelineCount() do local x=p:GetTimelineByIndex(i);if x:GetUniqueId()==id then return x end end
   end
@@ -72,7 +81,8 @@ return function(connect, array)
       return {ok=true,thumbnail=thumb,frame=frame}
     elseif a.action=='begin' then
       assert(not active);local r,p,tl=context(a,false);assert(not p:IsRenderingInProgress(),'Wait for rendering to finish');assert(r:GetProjectManager():SaveProject(),'Could not save project')
-      local copy=assert(tl:DuplicateTimeline(session.name..' - PostPilot Stabilized '..os.date('%H%M%S')),'Could not duplicate timeline');session.copy=copy:GetUniqueId();assert(p:SetCurrentTimeline(copy))
+      -- Date and time in the name keep copies traceable for days ('Tracker' = forced tracker version).
+      local copy=assert(tl:DuplicateTimeline(session.name..' - PostPilot '..(a.label=='Tracker' and 'Tracker' or 'Stabilized')..' '..os.date('%Y-%m-%d %H%M%S')),'Could not duplicate timeline');session.copy=copy:GetUniqueId();assert(p:SetCurrentTimeline(copy))
       return {ok=true,timeline=copy:GetName(),timelineId=copy:GetUniqueId()}
     elseif a.action=='frame' then
       assert(not active,'Wait for tracking to finish');local r,p,tl=context(a,true);local ref=assert(session.refs[a.key]);local it=assert(tl:GetItemListInTrack('video',ref.track)[ref.index])
@@ -132,7 +142,7 @@ return function(connect, array)
       -- picture analysis, default settings). Any tracking comp made for the clip goes first.
       assert(not active,'Wait for tracking to finish');local r,p,tl=context(a,true);local ref=assert(session.refs[a.key]);local it=assert(tl:GetItemListInTrack('video',ref.track)[ref.index])
       assert(it:GetStart()==ref.start and it:GetEnd()-it:GetStart()==ref.frames,'Clip was edited; scan again')
-      for _,name in ipairs(it:GetFusionCompNameList() or {}) do it:DeleteFusionCompByName(name) end
+      clearComps(it)
       if session.done then session.done[a.key]=nil end
       r:OpenPage('edit');seek(tl,ref.start);r:OpenPage('color');local ok=it:Stabilize();r:OpenPage('edit')
       assert(ok,"Resolve's stabilizer could not analyse this clip")
@@ -142,7 +152,7 @@ return function(connect, array)
       local r=assert(connect());local p=assert(r:GetProjectManager():GetCurrentProject(),'Open a project')
       local doomed,cur={},p:GetCurrentTimeline()
       for _,id in ipairs(a.ids or {}) do local tl=findTimeline(p,id)
-        if tl then assert(tl:GetName():match(' %- PostPilot Stabilized %d%d%d%d%d%d$'),'Not a PostPilot copy: '..tl:GetName());doomed[#doomed+1]=tl end end
+        if tl then local n=tl:GetName();assert(n:match(' %- PostPilot Stabilized [%d%- ]*%d%d%d%d%d%d$') or n:match(' %- PostPilot Tracker [%d%- ]*%d%d%d%d%d%d$'),'Not a PostPilot copy: '..n);doomed[#doomed+1]=tl end end
       if #doomed==0 then return {ok=true,deleted=0} end
       for _,tl in ipairs(doomed) do if cur and cur:GetUniqueId()==tl:GetUniqueId() then local back=findTimeline(p,a.back);if back then p:SetCurrentTimeline(back) end end end
       assert(p:GetMediaPool():DeleteTimelines(doomed),'Resolve could not delete the copy timelines')
@@ -170,9 +180,11 @@ return function(connect, array)
       local idx;for i=1,src:GetFusionCompCount() do local c=src:GetFusionCompByIndex(i);for _,tool in pairs(c:GetToolList()) do if not DEFAULT_TOOLS[tool:GetAttrs().TOOLS_RegID] then idx=idx or i end end end
       assert(idx,'This clip has no stabilization to apply')
       assert(src:ExportFusionComp(a.file,idx),'Could not export the stabilization')
-      -- Only empty default comps can be on the clip here; replace them with the stabilization.
-      for _,name in ipairs(dst:GetFusionCompNameList() or {}) do dst:DeleteFusionCompByName(name) end
+      -- Only empty default comps can be on the clip here; replace them with the stabilization
+      -- (import first: then they are no longer the clip's last composition and can go).
+      local old=dst:GetFusionCompNameList() or {}
       assert(dst:ImportFusionComp(a.file),'Could not apply the stabilization')
+      for _,name in ipairs(old) do dst:DeleteFusionCompByName(name) end
       if a.color and a.color~='' then dst:SetClipColor(a.color) else dst:ClearClipColor() end
       if a.removeMarkers then for _,mk in ipairs(a.markers or {}) do otl:DeleteMarkerAtFrame(mk.frame) end end
       src:SetClipColor('Teal');assert(r:GetProjectManager():SaveProject());return {ok=true}
@@ -181,7 +193,7 @@ return function(connect, array)
       local r=assert(connect());local p=assert(r:GetProjectManager():GetCurrentProject(),'Open a project')
       local otl=assert(findTimeline(p,a.timeline),'Your timeline was not found');local dst=otl:GetItemListInTrack('video',a.track)[a.index]
       assert(dst and dst:GetStart()==a.start and dst:GetDuration()==a.frames,'The clip in your timeline was edited since; remove the Fusion effect by hand')
-      for _,name in ipairs(dst:GetFusionCompNameList() or {}) do dst:DeleteFusionCompByName(name) end
+      clearComps(dst)
       if a.restoreMarkers then local have=otl:GetMarkers() or {}
         for _,mk in ipairs(a.markers or {}) do if not have[mk.frame] then otl:AddMarker(mk.frame,mk.color,mk.name,mk.note,mk.duration) end end end
       assert(r:GetProjectManager():SaveProject());return {ok=true}

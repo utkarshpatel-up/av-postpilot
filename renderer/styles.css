@@ -287,3 +287,5 @@ details.more summary { cursor: pointer; padding: 4px 0; }
 .n-main .muted { word-break: break-word; }
 .n-warn { color: #ffb74d; margin-top: 4px; }
 .n-btns { display: flex; gap: 4px; justify-content: flex-end; }
+/* Stabilization: the forced tracker version under a clip done with Resolve's stabilizer */
+.st-alt { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; padding: 8px 10px; border-left: 3px solid #ff8c2a; background: rgba(255, 140, 42, .06); border-radius: 6px; }

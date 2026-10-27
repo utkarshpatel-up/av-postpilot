@@ -5,8 +5,17 @@ backup server can be a Mac). It talks to Resolve through Resolve's own script ru
 (`fuscript.exe` + `electron/bridge.lua`), so the editing PCs need nothing extra
 installed: no Python.
 
-**Current version: 3.2.0** — downloads in `dist/`: Windows installer, Windows portable
+**Current version: 3.3.0** — downloads in `dist/`: Windows installer, Windows portable
 ZIP, macOS DMGs for Apple Silicon (arm64) and Intel (x64), plus SHA-256 checksums.
+
+## New in 3.3
+- **Stabilization: 🎯 Try tracker too** for clips done with Resolve's stabilizer: the
+  point-tracker version in its own copy, to compare both and approve either one.
+- **Earlier stabilizations:** every run is kept; open one again to review, approve or
+  undo, also after a shutdown.
+- Copy timelines carry the date as well as the time.
+- Fixed: ↺ Undo now really removes a Fusion stabilization (Resolve keeps a clip's last
+  composition; PostPilot puts an empty one in first).
 
 ## New in 3.2
 - **Night Queue**: scene cuts, stabilization, renders and encoding as steps that run
@@ -125,7 +134,8 @@ for an event sent to both. Existing single-topic settings are preserved on upgra
 Put a marker on each shaky clip in Resolve. On the Stabilization page tick the
 timelines (several run one after another), choose the marker colour, click
 **Find marked clips**, then **Stabilize selected clips**. PostPilot saves the
-project and works in one duplicate per timeline ("… - PostPilot Stabilized HHMMSS").
+project and works in one duplicate per timeline ("… - PostPilot Stabilized
+2026-10-27 175203": date and time, so copies stay traceable for days).
 Clips with real Fusion work are skipped; empty default comps are reused.
 
 Per clip:
@@ -164,6 +174,22 @@ the clip was edited after the run. Once every stabilized clip of a copy is appro
 **🗑 Delete stabilized copies** removes those copy timelines (only timelines PostPilot
 created; it switches back to your timeline first). Results:
 `stabilization-last-report.json`.
+
+**🎯 Try tracker too** (clips done with Resolve's stabilizer): PostPilot also makes the
+point-tracker version, even though the trust check said no, in its own copy ("… -
+PostPilot Tracker <date> <time>"). The clip then shows both versions: ▶ Review
+Resolve version / ▶ Review tracker version, and ✔ Approve either one. The tracker
+version is always marked for review and can be undone like any Fusion stabilization.
+
+**Earlier stabilizations:** every run is kept (`stabilization-history/`, one file per
+run, updated after each approve, undo, tracker version or deleted copy). The list at
+the bottom of the page shows date, project, timelines, results and copy timelines;
+**Open** brings a run back into the review list, also after a shutdown, with copies
+deleted in Resolve meanwhile marked as gone. A run opens only in its own project.
+
+Resolve never deletes a clip's last Fusion composition by script, so PostPilot adds
+an empty one first when it removes a stabilization (undo, or switching a tracked clip
+to Resolve's stabilizer).
 
 Measured on 4K test shots: rigid backgrounds about half the shake left, no black
 edges; tight audience shots via Resolve's stabilizer. Tools for checking new kinds

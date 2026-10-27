@@ -383,9 +383,26 @@ const encoder = new Encoder({
   onChange: () => { send('encoder', encoder.summary()); updateTray(); },
   onQueueDone: afterQueue,
 });
+// Every stabilization run is kept (one file each) so it can be reviewed again later.
+const STAB_HISTORY = path.join(DATA, 'stabilization-history');
+const stabHistory = {
+  file: (id) => { if (!/^[\w-]+$/.test(id)) throw Error('Bad record name'); return path.join(STAB_HISTORY, `${id}.json`); },
+  save(run) { writeJson(this.file(run.id), run); },
+  load(id) { return readJson(this.file(id), null); },
+  list() {
+    let names = [];
+    try { names = fs.readdirSync(STAB_HISTORY).filter((n) => n.endsWith('.json')).sort().reverse().slice(0, 100); } catch {}
+    return names.map((n) => readJson(path.join(STAB_HISTORY, n), null)).filter(Boolean).map((r) => {
+      const count = (f) => r.clips.filter(f).length;
+      return { id: r.id, date: r.date, project: r.project, timelines: r.timelines, copies: r.copies, clips: count((c) => c.copyTimelineId),
+        applied: count((c) => c.approved), passed: count((c) => c.status === 'Passed'), resolve: count((c) => c.method === 'resolve'), tracker: count((c) => c.alt) };
+    });
+  },
+};
 const stabilization = new Stabilization({ bridge, log, onChange: s => send('stabilize', s),
   grab:createFrameGrabber({bridge,nativeImage,directory:path.join(DATA,'stabilization-check')}),
-  saveReport:report=>fs.writeFileSync(path.join(DATA,'stabilization-last-report.json'),JSON.stringify(report,null,2)) });
+  saveReport:report=>fs.writeFileSync(path.join(DATA,'stabilization-last-report.json'),JSON.stringify(report,null,2)),
+  history: stabHistory, project: () => status.project?.name || '' });
 autosaver.isPaused = () => encoder.running || stabilization.running;
 
 // Installed font names, for the Premiere title check (Windows registry / Mac font folders).
@@ -603,6 +620,7 @@ ipcMain.handle('stabilize', async (_e, args) => {
   try {
     if (args.action === 'summary') return { ok: true, ...stabilization.summary() };
     if (args.action === 'stop') return stabilization.stop();
+    if (args.action === 'runs') return { ok: true, runs: stabilization.runs() };
     if (night.running) return { ok: false, error: 'The night queue is running' };
     if (encoder.running || sceneQueue.running || autosaver.running || shutdownAt) return { ok: false, error: 'Finish the current operation and cancel any planned shutdown first' };
     if (args.action === 'timelines') return await stabilization.timelines();
@@ -618,7 +636,9 @@ ipcMain.handle('stabilize', async (_e, args) => {
       return result;
     }
     if (args.action === 'review') return await stabilization.review(args.key, args.where);
-    if (args.action === 'approve') return await stabilization.approve(args.keys || [], { removeMarkers: Boolean(args.removeMarkers), file: path.join(DATA, 'stabilization-apply.comp') });
+    if (args.action === 'approve') return await stabilization.approve(args.keys || [], { removeMarkers: Boolean(args.removeMarkers), file: path.join(DATA, 'stabilization-apply.comp'), version: args.version });
+    if (args.action === 'force') return await stabilization.forceTracker(args.key, args.anchors || []);
+    if (args.action === 'open') return await stabilization.openRun(args.id);
     if (args.action === 'undo') return await stabilization.undo(args.key);
     if (args.action === 'deletecopies') return await stabilization.deleteCopies();
     if (stabilization.running) return { ok: false, error: 'Wait for tracking to finish' };

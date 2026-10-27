@@ -136,3 +136,66 @@ test('points that disagree after tracking also fall back to Resolve', async () =
   assert.ok(calls.some(a => a.action === 'resolvestab'));
   assert.equal(calls.some(a => a.action === 'apply'), false);
 });
+
+// Forced tracker version next to Resolve's stabilizer, and the run history.
+function setupForce(paths) {
+  const calls = [], saved = new Map();
+  const clips = { A: [{ key: '1:1', start: 0, frames: 200, fusion: 0 }] };
+  const history = { save: run => saved.set(run.id, JSON.parse(JSON.stringify(run))), list: () => [...saved.values()], load: id => saved.get(id) };
+  const s = new Stabilization({ log() {}, onChange() {}, wait: async () => {}, grab: async () => [], history, project: () => 'P', bridge: { stabilize: async a => { calls.push(a);
+    if (a.action === 'scan') return { ok: true, colors: ['Blue'], clips: clips.A, timeline: 'TL A', timelineId: 'A' };
+    if (a.action === 'begin') return a.label === 'Tracker' ? { ok: true, timeline: 'TL A - PostPilot Tracker 2026-10-27 120000', timelineId: 'tracker-id' } : { ok: true, timeline: 'TL A - PostPilot Stabilized 2026-10-27 110000', timelineId: 'copy-id' };
+    if (a.action === 'progress') return { ok: true, running: false, paths: paths(), width: 3840, height: 2160 };
+    if (a.action === 'list') return { ok: true, timelines: [{ id: 'A' }, { id: 'copy-id' }] };
+    return { ok: true }; } } });
+  return { s, calls, saved };
+}
+const wild = (x, y) => path(x, y, n => [Math.sin(n * x * 7) * .02, Math.cos(n * y * 5) * .02]);
+test('a clip done with Resolve can get a forced tracker version in its own copy', async () => {
+  const { s, calls } = setupForce(() => [wild(.2, .8), wild(.7, .5), wild(.4, .3)]);
+  await s.scan('Blue', ['A']);
+  await s.start(['A|1:1']);                       // no fixed details -> Resolve's stabilizer
+  const c = s.clips[0];
+  assert.equal(c.method, 'resolve');
+  await s.forceTracker('A|1:1', pts('A|1:1'));
+  const begin = calls.filter(a => a.action === 'begin');
+  assert.deepEqual(begin.map(a => a.label), [undefined, 'Tracker']);
+  const apply = calls.find(a => a.action === 'apply');
+  assert.ok(apply.use.length >= 1, 'forced: applied although the points disagree');
+  assert.equal(c.status, 'Stabilized (Resolve)');  // the first version is kept
+  assert.equal(c.alt.status, 'Tracker (forced)');
+  assert.equal(c.alt.copyTimelineId, 'tracker-id');
+  assert.match(c.alt.reason, /safety check would not/); assert.doesNotMatch(c.alt.reason, /left unchanged/);
+});
+test('either version can be approved; the tracker version can be undone; both copies can go', async () => {
+  const { s, calls } = setupForce(() => [wild(.2, .8), wild(.7, .5), wild(.4, .3)]);
+  await s.scan('Blue', ['A']); await s.start(['A|1:1']); await s.forceTracker('A|1:1', pts('A|1:1'));
+  assert.deepEqual(s.copiesReady(), []);
+  const r = await s.approve(['A|1:1'], { version: 'tracker', file: 'x.comp' });
+  assert.equal(r.applied, 1);
+  const a = calls.find(x => x.action === 'approve');
+  assert.deepEqual([a.copy, a.method], ['tracker-id', undefined]);   // Fusion comp, not Resolve's stabilizer
+  assert.equal(s.clips[0].approvedVersion, 'tracker');
+  assert.deepEqual(s.copiesReady().sort(), ['copy-id', 'tracker-id']);
+  await s.undo('A|1:1');
+  assert.equal(s.clips[0].approved, false);
+});
+test('every run is kept and can be opened again for review', async () => {
+  const { s, saved } = setupForce(() => [path(.2, .8), path(.7, .5), path(.8, .2)]);
+  await s.scan('Blue', ['A']);
+  await s.start(['A|1:1'], pts('A|1:1'));
+  const [run] = saved.values();
+  assert.match(run.id, /^\d{4}-\d{2}-\d{2}_\d{6}$/);
+  assert.deepEqual([run.project, run.timelines, run.copies], ['P', ['TL A'], ['TL A - PostPilot Stabilized 2026-10-27 110000']]);
+  await s.approve(['A|1:1'], { file: 'x.comp' });
+  assert.equal(saved.get(run.id).clips[0].approved, true);       // review actions update the record
+  // After a restart: a fresh instance opens the run with its clips.
+  const fresh = new Stabilization({ log() {}, onChange() {}, history: { load: id => saved.get(id), list: () => [], save() {} }, project: () => 'P',
+    bridge: { stabilize: async () => ({ ok: true, timelines: [{ id: 'A' }] }) } });
+  const o = await fresh.openRun(run.id);
+  assert.equal(o.clips[0].approved, true);
+  assert.equal(o.clips[0].copyDeleted, true);    // its copy is no longer in the project
+  assert.equal(o.hasCopy, true);
+  const other = new Stabilization({ log() {}, onChange() {}, history: { load: id => saved.get(id) }, project: () => 'Other', bridge: {} });
+  await assert.rejects(other.openRun(run.id), /Open the project "P"/);
+});

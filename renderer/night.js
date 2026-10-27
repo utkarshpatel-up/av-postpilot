@@ -11,7 +11,7 @@ async function nLoadLists() {
   const [scene, stab] = await Promise.all([pilot.listSeries(), pilot.stabilize('timelines')]);
   if (scene.ok) nTimelines = scene.allNames || [];
   // Stabilized copies are results, not sources.
-  if (stab.ok) nStabTimelines = stab.timelines.filter((t) => !/ - PostPilot Stabilized \d{6}$/.test(t.name));
+  if (stab.ok) nStabTimelines = stab.timelines.filter((t) => !/ - PostPilot (Stabilized|Tracker) [\d -]*\d{6}$/.test(t.name));
   else if (!scene.ok) toast(stab.error || scene.error, true);
   const colors = [...new Set(nStabTimelines.flatMap((t) => Object.keys(t.markers || {})))].sort();
   const chosen = $('n-color').value;

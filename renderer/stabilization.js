@@ -11,7 +11,7 @@ async function stLoadTimelines() {
   try {
     const r = await pilot.stabilize('timelines'); if (!r.ok) throw Error(r.error);
     // Stabilized copies are results, not sources: keep them out of the list.
-    stTimelines = r.timelines.filter(t => !/ - PostPilot Stabilized \d{6}$/.test(t.name));
+    stTimelines = r.timelines.filter(t => !/ - PostPilot (Stabilized|Tracker) [\d -]*\d{6}$/.test(t.name));
     const ids = new Set(stTimelines.map(t => t.id));
     stTlChecked = new Set([...stTlChecked].filter(id => ids.has(id)));
     if (!stTlChecked.size) stTimelines.filter(t => t.current).forEach(t => stTlChecked.add(t.id));
@@ -27,7 +27,7 @@ function stRenderTimelines() {
   $('st-timelines').querySelectorAll('[data-st-tl]').forEach(el => el.addEventListener('change', () => { el.checked ? stTlChecked.add(el.dataset.stTl) : stTlChecked.delete(el.dataset.stTl); }));
 }
 $('st-tl-refresh').addEventListener('click', stLoadTimelines);
-$('st-tl-all').addEventListener('click', () => { const color = $('st-color').value; stTlChecked = new Set(stTimelines.filter(t => (color === 'All' ? t.count : t.markers[color]) > 0 && !/PostPilot Stabilized/.test(t.name)).map(t => t.id)); stRenderTimelines(); });
+$('st-tl-all').addEventListener('click', () => { const color = $('st-color').value; stTlChecked = new Set(stTimelines.filter(t => (color === 'All' ? t.count : t.markers[color]) > 0 && !/ - PostPilot (Stabilized|Tracker) /.test(t.name)).map(t => t.id)); stRenderTimelines(); });
 $('st-color').addEventListener('change', stRenderTimelines);
 stNav.addEventListener('click', stLoadTimelines);
 const stClock = ms => { const t = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`; };
@@ -39,12 +39,21 @@ function stClipRow(c, i) {
   const pct = ['Tracking'].includes(c.status) ? ` ${c.percent || 0}%` : '';
   const done = Boolean(c.copyTimelineId) && !st.running && ['Passed', 'Needs review', 'Stabilized (Resolve)'].includes(c.status);
   const usable = done && !/Left unstabilized|No details|No fixed/.test(c.reason || '');
+  // A clip done with Resolve's stabilizer can also get a forced tracker version (c.alt) to compare.
+  const alt = c.alt, two = Boolean(alt);
+  const altRunning = st.running && st.forcing === c.key;
+  const altUsable = alt && !altRunning && alt.copyTimelineId && !alt.copyDeleted && !/Left unstabilized|No details/.test(alt.reason || '') && ['Tracker (forced)', 'Needs review'].includes(alt.status);
+  const undoable = c.approved && !(c.method === 'resolve' && c.approvedVersion !== 'tracker');
+  const tryTracker = c.method === 'resolve' && !alt && !c.approved && !c.copyDeleted && !st.running
+    ? `<button class="btn" data-st-force="${esc(c.key)}" title="Also make a version with PostPilot's point tracker, in its own timeline copy, to compare with Resolve's stabilizer">🎯 Try tracker too</button>` : '';
   const actions = c.copyTimelineId && !running
-    ? `<div class="st-actions"><button class="btn" data-st-go="${esc(c.key)}" data-where="copy" title="Jump to this clip in the stabilized copy" ${c.copyDeleted ? 'disabled' : ''}>▶ Review</button><button class="btn" data-st-go="${esc(c.key)}" data-where="original" title="Same clip in your original timeline">⇄ Original</button>${c.approved && c.method === 'resolve' ? '' : c.approved ? `<button class="btn" data-st-undo="${esc(c.key)}" title="Remove the stabilization from your timeline again">↺ Undo</button>` : usable ? `<button class="btn primary" data-st-approve="${esc(c.key)}" title="Apply this stabilization to the clip in your timeline">✔ Approve</button>` : ''}</div>`
-    : `<button class="btn" data-st-review="${esc(c.key)}" ${st.running || st.hasCopy || c.fusion ? 'disabled' : ''}>Choose points (optional)</button>`;
-  const status = c.approved ? '✔ Applied to your timeline' : c.status;
+    ? `<div class="st-actions"><button class="btn" data-st-go="${esc(c.key)}" data-where="copy" title="Jump to this clip in the stabilized copy" ${c.copyDeleted ? 'disabled' : ''}>▶ Review${two ? ' Resolve version' : ''}</button><button class="btn" data-st-go="${esc(c.key)}" data-where="original" title="Same clip in your original timeline">⇄ Original</button>${undoable ? `<button class="btn" data-st-undo="${esc(c.key)}" title="Remove the stabilization from your timeline again">↺ Undo</button>` : c.approved ? '' : usable ? `<button class="btn primary" data-st-approve="${esc(c.key)}" title="Apply this stabilization to the clip in your timeline">✔ Approve${two ? ' Resolve version' : ''}</button>` : ''}${tryTracker}</div>`
+    : running ? '' : `<button class="btn" data-st-review="${esc(c.key)}" ${st.running || st.hasCopy || c.fusion ? 'disabled' : ''}>Choose points (optional)</button>`;
+  const altTime = altRunning && alt?.startedAt ? ` · ⏱ ${stClock(Date.now() - alt.startedAt)}` : alt?.elapsedMs ? ` · ⏱ ${stClock(alt.elapsedMs)}` : '';
+  const altRow = alt ? `<div class="st-alt"><span class="small"><b>Tracker version</b> · <b style="color:${c.approvedVersion === 'tracker' ? '#3ccf8e' : '#ff8c2a'}">${esc(c.approvedVersion === 'tracker' ? '✔ Applied to your timeline' : alt.status)}${alt.status === 'Tracking' ? ` ${alt.percent || 0}%` : ''}</b>${altTime}${alt.copyTimelineName ? ` · <span class="muted">${esc(alt.copyTimelineName)}</span>` : ''}</span>${alt.reason ? `<span class="muted small">${esc(alt.reason)}</span>` : ''}${altRunning ? '' : `<div class="st-actions"><button class="btn" data-st-go="${esc(c.key)}" data-where="tracker" ${alt.copyDeleted ? 'disabled' : ''}>▶ Review tracker version</button>${!c.approved && altUsable ? `<button class="btn primary" data-st-approve-tracker="${esc(c.key)}" title="Apply the tracker version to the clip in your timeline instead">✔ Approve tracker version</button>` : ''}</div>`}</div>` : '';
+  const status = c.approved ? `✔ Applied to your timeline${two ? (c.approvedVersion === 'tracker' ? ' (tracker version)' : ' (Resolve version)') : ''}` : c.status;
   const motion = !c.copyTimelineId && !c.fusion ? `<label class="check inline small st-motion" title="Rare: the operator pans or reframes on purpose. Then only the fast shake is removed and the camera move is kept."><input type="checkbox" data-st-motion="${esc(c.key)}" ${c.motion ? 'checked' : ''} ${st.running ? 'disabled' : ''}> Camera moves on purpose (smooth only)</label>` : c.motion ? '<span class="muted small">Smooth: camera move kept</span>' : '';
-  return `${head}<div class="st-clip${running ? ' st-running' : ''}"><label><input type="checkbox" data-st-select="${esc(c.key)}" ${c.selected ? 'checked' : ''} ${st.running || st.hasCopy || c.fusion ? 'disabled' : ''}> ${esc(c.marker)} · ${esc(c.color)}${c.note ? ` · ${esc(c.note)}` : ''}</label><span class="muted small">${c.frames} frames · ${esc(c.name)} · <b style="color:${c.approved ? '#3ccf8e' : stColor[c.status] || 'inherit'}">${esc(status)}${pct}</b>${time}</span>${c.reason ? `<span class="muted small">${esc(c.reason)}</span>` : ''}${motion}${actions}</div>`;
+  return `${head}<div class="st-clip${running ? ' st-running' : ''}"><label><input type="checkbox" data-st-select="${esc(c.key)}" ${c.selected ? 'checked' : ''} ${st.running || st.hasCopy || c.fusion ? 'disabled' : ''}> ${esc(c.marker)} · ${esc(c.color)}${c.note ? ` · ${esc(c.note)}` : ''}</label><span class="muted small">${c.frames} frames · ${esc(c.name)} · <b style="color:${c.approved ? '#3ccf8e' : stColor[c.status] || 'inherit'}">${esc(status)}${pct}</b>${time}</span>${c.reason ? `<span class="muted small">${esc(c.reason)}</span>` : ''}${c.copyTimelineName ? `<span class="muted small">In ${esc(c.copyTimelineName)}</span>` : ''}${motion}${actions}${altRow}</div>`;
 }
 function stLive() {
   const run = st.clips.filter(c => c.startedAt || c.elapsedMs || c.status === 'Waiting' || c.copyTimelineId);
@@ -56,7 +65,12 @@ function stLive() {
   const fraction = (finished + (cur ? (cur.percent || 0) / 100 : 0)) / total;
   $('st-live-bar').style.width = `${Math.round(fraction * 100)}%`;
   const passed = run.filter(c => c.status === 'Passed').length, review = run.filter(c => c.status === 'Needs review').length; const viaResolve = run.filter(c => c.status === 'Stabilized (Resolve)').length;
-  if (st.running) {
+  const forced = st.forcing && st.clips.find(c => c.key === st.forcing);
+  if (forced) {
+    const a = forced.alt || {};
+    $('st-live-bar').style.width = `${a.percent || 0}%`;
+    $('st-live-text').innerHTML = `<b>Tracker version</b> · ${esc(forced.name)} · ${esc(a.status || 'preparing')}${a.status === 'Tracking' ? ` ${a.percent || 0}%` : ''}${a.startedAt ? ` · ${stClock(Date.now() - a.startedAt)}` : ''}`;
+  } else if (st.running) {
     $('st-live-text').innerHTML = `<b>Clip ${Math.min(finished + 1, total)} of ${total}</b> · ${esc(cur ? cur.name : 'preparing')} · ${esc(cur ? cur.status : '')}${cur && cur.status === 'Tracking' ? ` ${cur.percent || 0}%` : ''}${cur && cur.startedAt ? ` · this clip ${stClock(Date.now() - cur.startedAt)}` : ''} · total ${stClock(Date.now() - st.startedAt)}${st.stopping ? ' · stopping after this clip' : ''}`;
   } else {
     $('st-live-text').innerHTML = `<b>Finished ${finished} clip${finished === 1 ? '' : 's'} in ${stClock((st.finishedAt || Date.now()) - st.startedAt)}</b> · ${passed} passed${viaResolve ? ` · ${viaResolve} via Resolve's stabilizer` : ''} · ${review} need review. Review each clip, then approve.`;
@@ -79,6 +93,8 @@ function stRender() {
   stLive();
   $('st-clips').querySelectorAll('[data-st-go]').forEach(el => el.addEventListener('click', () => stDo(pilot.stabilize('review', { key: el.dataset.stGo, where: el.dataset.where }))));
   $('st-clips').querySelectorAll('[data-st-approve]').forEach(el => el.addEventListener('click', async () => { const r = await stDo(pilot.stabilize('approve', { keys: [el.dataset.stApprove], removeMarkers: $('st-remove-markers').checked })); if (r) toast('Applied to your timeline'); }));
+  $('st-clips').querySelectorAll('[data-st-approve-tracker]').forEach(el => el.addEventListener('click', async () => { const r = await stDo(pilot.stabilize('approve', { keys: [el.dataset.stApproveTracker], version: 'tracker', removeMarkers: $('st-remove-markers').checked })); if (r) toast('Tracker version applied to your timeline'); }));
+  $('st-clips').querySelectorAll('[data-st-force]').forEach(el => el.addEventListener('click', async () => { const r = await stDo(pilot.stabilize('force', { key: el.dataset.stForce })); if (r) { toast('Tracker version ready: compare both, then approve one'); stLoadRuns(); } }));
   $('st-clips').querySelectorAll('[data-st-undo]').forEach(el => el.addEventListener('click', async () => { const r = await stDo(pilot.stabilize('undo', { key: el.dataset.stUndo })); if (r) toast('Removed from your timeline'); }));
   $('st-clips').querySelectorAll('[data-st-motion]').forEach(el => el.addEventListener('change', () => { st.clips.find(c => c.key === el.dataset.stMotion).motion = el.checked; }));
   $('st-clips').querySelectorAll('[data-st-select]').forEach(el => el.addEventListener('change', () => { st.clips.find(c => c.key === el.dataset.stSelect).selected = el.checked; stRender(); }));
@@ -144,3 +160,27 @@ $('st-delete-copies').addEventListener('click', async () => {
   const r = await stDo(pilot.stabilize('deletecopies'));
   if (r) toast(`Deleted ${r.deleted} copy timeline(s)`);
 });
+
+// Earlier runs: open one to review it again (the list is kept on disk).
+async function stLoadRuns() {
+  const r = await pilot.stabilize('runs');
+  if (!r.ok) return;
+  const when = d => new Date(d).toLocaleString([], { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  $('st-runs').innerHTML = r.runs.length ? `<table class="jobs"><thead><tr><th>When</th><th>Project</th><th>Timelines</th><th>Clips</th><th>Copy timelines</th><th></th></tr></thead><tbody>${r.runs.map(x => `<tr>
+    <td>${esc(when(x.date))}</td><td>${esc(x.project || '')}</td><td>${esc(x.timelines.join(', '))}</td>
+    <td>${x.clips} · ${x.passed} passed${x.resolve ? ` · ${x.resolve} via Resolve` : ''}${x.tracker ? ` · ${x.tracker} tracker version` : ''} · <b>${x.applied} applied</b></td>
+    <td class="muted small">${esc(x.copies.join(', '))}</td>
+    <td>${st.runId === x.id ? '<span class="muted">open above</span>' : `<button class="btn" data-st-run="${esc(x.id)}" ${st.running ? 'disabled' : ''}>Open</button>`}</td></tr>`).join('')}</tbody></table>` : 'None yet';
+  $('st-runs').querySelectorAll('[data-st-run]').forEach(el => el.addEventListener('click', async () => {
+    const o = await stDo(pilot.stabilize('open', { id: el.dataset.stRun }));
+    if (!o) return;
+    stKey = ''; stPreview = null; st = o; stRender(); stLoadRuns();
+    $('st-clips').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }));
+}
+$('st-runs-refresh').addEventListener('click', stLoadRuns);
+stNav.addEventListener('click', stLoadRuns);
+// Keep the list current: after a run, a tracker version, or a review action (applied counts).
+let stRunsKey = '';
+pilot.onStabilize(s => { const key = `${s.running}|${s.runId}|${s.clips.filter(c => c.approved).length}|${s.copiesReady}`; if (!s.running && key !== stRunsKey) stLoadRuns(); stRunsKey = key; });
+stLoadRuns();
