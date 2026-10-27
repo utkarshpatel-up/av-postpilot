@@ -15,7 +15,7 @@ jobs:
   mac:
     runs-on: macos-14
     permissions:
-      contents: read
+      contents: write   # to create the draft release holding the DMGs
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -29,11 +29,16 @@ jobs:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - name: Check native app startup and packaged Mac scripts
         run: node scripts/verify-mac-package.js
-      - uses: actions/upload-artifact@v4
-        with:
-          name: AV-PostPilot-macOS
-          path: dist/AV-PostPilot-*-macOS-*.dmg
-          if-no-files-found: error
-          # Download the build right after it finishes. Storage is billed for as
-          # long as it's kept, and the free plan includes only 0.5 GB.
-          retention-days: 7
+      # The DMGs go into a draft release (visible only to the repo's owner), not an
+      # artifact: release files don't count against the account's artifact storage
+      # quota, which 190 MB builds filled. Download into dist/, then delete the draft.
+      - name: Put the DMGs in a draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(node -p "require('./package.json').version")
+          ls dist/AV-PostPilot-*-macOS-*.dmg
+          gh release create "mac-build-${{ github.run_number }}" dist/AV-PostPilot-*-macOS-*.dmg \
+            --draft --target "$GITHUB_SHA" \
+            --title "Mac build $version (${GITHUB_SHA::7})" \
+            --notes "macOS DMGs of $version for dist/. Download, then delete this draft."

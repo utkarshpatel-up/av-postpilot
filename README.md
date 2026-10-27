@@ -411,6 +411,9 @@ Run `npm ci` then `npm run dist:mac` **on a Mac**, or run the repository's
 **Build macOS distributions** GitHub Actions workflow. It produces separate Intel
 (`x64`) and Apple Silicon (`arm64`) DMGs containing `AV PostPilot.app`, including the
 PostPilot backup engine. Open the matching DMG and drag the app to Applications; no PostgreSQL tools are bundled.
+The workflow puts the DMGs in a **draft release** named `mac-build-<run>` (only visible
+to the repo owner; release files don't count against GitHub's artifact storage):
+`gh release download mac-build-<run> -D dist`, then `gh release delete mac-build-<run> --yes`.
 Mac starts with automatic Resolve launch disabled, suitable for the library server.
 The build uses an ad-hoc signature, not Apple Developer ID signing/notarization;
 macOS may require approval in Privacy & Security. Windows cannot build this macOS
