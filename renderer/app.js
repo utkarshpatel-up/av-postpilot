@@ -53,6 +53,7 @@ function go(page) {
   if (page === 'encoder' && !presets.length && status.connected) loadPresets(true);
   if (page === 'scene' && status.connected && status.project) loadSceneTimelines();
   if (page === 'night' && typeof nLoadLists === 'function') nLoadLists();
+  if (page === 'handbrake' && typeof hbRenderForm === 'function') hbRenderForm();
   if (page === 'episodes') {
     $('e-project').textContent = status.project?.name || 'no project open';
     if (status.connected && status.project) loadSeries();
@@ -727,6 +728,7 @@ function renderRendersForm() {
   $('st-after').value = settings.stab.afterQueue; $('st-remove-markers').checked = Boolean(settings.stab.removeMarkers);
   $('enc-after').value = settings.encoder.afterQueue;
   $('n-after').value = settings.night.afterQueue;
+  $('hb-after').value = settings.handbrake.afterQueue;
   renderCountdowns();
   renderShutdown();
   const hd = r.hd;
@@ -789,7 +791,7 @@ function renderCountdowns() {
     const secs = settings[group].shutdownSeconds;
     el.querySelector('.cd-min').value = Math.floor(secs / 60);
     el.querySelector('.cd-sec').value = secs % 60;
-    const select = { scene: $('s-after'), renders: $('rn-after'), encoder: $('enc-after'), stab: $('st-after'), night: $('n-after') }[group];   // manual: always shown
+    const select = { scene: $('s-after'), renders: $('rn-after'), encoder: $('enc-after'), stab: $('st-after'), night: $('n-after'), handbrake: $('hb-after') }[group];   // manual: always shown
     el.classList.toggle('hidden', Boolean(select) && select.value !== 'shutdown');
   });
 }
@@ -840,6 +842,7 @@ function renderShutdown() {
     ['scene', scene.running, 'scene cuts'],
     ['stab', typeof st !== 'undefined' && st.running, 'stabilization'],
     ['encoder', enc.running, 'encoding'],
+    ['handbrake', typeof hb !== 'undefined' && hb.running, 'HandBrake conversion'],
   ].filter(([, on]) => on);
   const choice = { silent: 'do nothing', nothing: 'just notify', shutdown: 'shut down' };
   const plan = running.filter(([g]) => settings[g]?.afterQueue === 'shutdown')
@@ -866,6 +869,7 @@ const EVENTS = [
   ['encoderQueueDone', 'The encoder queue finishes'],
   ['stabQueueDone', 'The stabilization queue finishes'],
   ['nightQueueDone', 'The night queue finishes'],
+  ['handbrakeDone', 'HandBrake conversion finishes'],
   ['shutdown', 'The PC is about to shut down'],
   ['autosaveFailed', 'Auto-save has a problem (e.g. NAS offline)'],
   ['projectCreated', 'A new project is created'],

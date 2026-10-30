@@ -32,6 +32,8 @@
         <svg viewBox="0 0 24 24"><path d="M4 5h16v2H4zm0 4h10v2H4zm0 4h10v2H4zm0 4h16v2H4zm12-8 6 4-6 4z"/></svg>Encoder<span class="soon hidden" id="nav-enc-badge"></span></button>
       <button class="nav" data-page="night">
         <svg viewBox="0 0 24 24"><path d="M12.3 2a8 8 0 1 0 9.7 9.7A7 7 0 0 1 12.3 2zM18 2l.7 1.8L20.5 4.5l-1.8.7L18 7l-.7-1.8-1.8-.7 1.8-.7z"/></svg>Night Queue<span class="soon hidden" id="nav-night-badge"></span></button>
+      <button class="nav" data-page="handbrake">
+        <svg viewBox="0 0 24 24"><path d="M4 4h10v6H4zm0 10h10v6H4zm12-7 6 5-6 5v-3h-3v-4h3z"/></svg>HandBrake<span class="soon hidden" id="nav-hb-badge"></span></button>
       <button class="nav" data-page="notify">
         <svg viewBox="0 0 24 24"><path d="M12 22a2 2 0 0 0 2-2h-4a2 2 0 0 0 2 2zm6-6V11a6 6 0 0 0-5-5.9V4a1 1 0 0 0-2 0v1.1A6 6 0 0 0 6 11v5l-2 2v1h16v-1z"/></svg>Notifications</button>
       <button class="nav" data-page="librarybackup">
@@ -541,6 +543,66 @@
       </div>
     </section>
 
+    <!-- ================================================= HandBrake Converter -->
+    <section class="page" id="page-handbrake">
+      <h1>HandBrake Converter</h1>
+      <p class="lead">Convert a whole satsang folder to H.265 with HandBrakeCLI and a preset exported from HandBrake. The output folder mirrors the input; other files are copied as they are. Resolve is not needed.</p>
+
+      <div class="card">
+        <div class="card-label">Folders</div>
+        <div class="row"><label for="hb-input">Input folder</label><input type="text" id="hb-input" class="grow" placeholder="e.g. D:\Convert"><button class="btn" data-hb-browse="inputDir">Browse…</button></div>
+        <div class="row"><label for="hb-output">Output folder</label><input type="text" id="hb-output" class="grow" placeholder="e.g. D:\Laptop Recording"><button class="btn" data-hb-browse="outputDir">Browse…</button></div>
+        <div class="row" id="hb-h264-row"><label for="hb-h264">H264 recordings folder</label><input type="text" id="hb-h264" class="grow" placeholder="files named like &quot;2725 01 Adalaj General Satsang ….mp4&quot;"><button class="btn" data-hb-browse="h264Dir">Browse…</button></div>
+        <div class="row"><label for="hb-report">Reports folder</label><input type="text" id="hb-report" class="grow"><button class="btn" data-hb-browse="reportDir">Browse…</button><button class="btn" id="hb-open-report">Open</button></div>
+      </div>
+
+      <div class="card">
+        <div class="card-label">What to do</div>
+        <label class="check"><input type="radio" name="hb-mode" value="all"> Convert everything: satsangs and Clips for Insert</label>
+        <label class="check"><input type="radio" name="hb-mode" value="clips"> Clips for Insert only (Cam-01, Cam-02 …), then put the H264 recordings into their satsang folders</label>
+        <div class="row" id="hb-copy-row" style="margin-left:23px">
+          <label for="hb-copy" style="min-width:0">H264 recordings are</label>
+          <select id="hb-copy"><option value="copy">copied (originals stay)</option><option value="move">moved</option></select>
+        </div>
+        <p class="muted small">H264 recordings are matched by their numbers: "2725 01 …" goes into satsang 2725, session 01. Without a session number the name is matched to a session folder; if none fits, the file goes into the satsang folder itself. Videos that are already converted in the output are skipped, so a stopped run can simply be started again.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-label">HandBrake</div>
+        <div class="row"><label for="hb-preset">Preset file</label><input type="text" id="hb-preset" class="grow" placeholder="custom-preset.json exported from HandBrake (Presets → Export)"><span class="pill hidden" id="hb-preset-check"></span><button class="btn" id="hb-preset-browse">Browse…</button></div>
+        <div class="row"><label>HandBrakeCLI</label><span class="grow small" id="hb-cli"></span><button class="btn" id="hb-cli-browse">Choose…</button></div>
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <label for="hb-after">When conversion finishes</label>
+          <select id="hb-after">
+            <option value="silent">Do nothing</option><option value="nothing">Just notify</option>
+            <option value="shutdown">Notify and shut down this PC</option>
+          </select>
+          <span class="countdown" data-for="handbrake">after
+            <input type="number" class="cd-min" min="0" max="1440"> min
+            <input type="number" class="cd-sec" min="0" max="59"> s</span>
+        </div>
+        <div class="row">
+          <button class="btn" id="hb-preview">Preview</button>
+          <button class="btn primary" id="hb-start">Start converting</button>
+          <button class="btn" id="hb-stop">Stop</button>
+          <span class="muted small" id="hb-summary"></span>
+        </div>
+        <div id="hb-progress" class="hidden"><div class="bar" style="width:100%"><i id="hb-bar"></i></div><div class="small" id="hb-current"></div></div>
+        <p class="muted small">Stop ends the file being converted and removes its unfinished output. Long Windows paths (over 260 characters) can make HandBrakeCLI fail: keep the input and output folders short, e.g. D:\In and D:\Out.</p>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div class="card-label" id="hb-list-label">Files</div>
+          <label class="check inline"><input type="checkbox" id="hb-show-skipped"> Show skipped</label>
+        </div>
+        <div id="hb-items"><div class="empty">Click "Preview" to see what will be converted, copied and skipped.</div></div>
+      </div>
+    </section>
+
     <section class="page" id="page-notify">
       <h1>Notifications</h1>
       <p class="lead">Switch a service on with its switch; click its name for its settings. Enabled services receive the same event messages, including this PC's name.</p>
@@ -747,6 +809,7 @@
   <script src="stabilization.js"></script>
   <script src="premiere.js"></script>
   <script src="night.js"></script>
+  <script src="handbrake.js"></script>
 </body>
 </html>
 
