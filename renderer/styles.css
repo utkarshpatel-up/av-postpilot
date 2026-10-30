@@ -289,3 +289,10 @@ details.more summary { cursor: pointer; padding: 4px 0; }
 .n-btns { display: flex; gap: 4px; justify-content: flex-end; }
 /* Stabilization: the forced tracker version under a clip done with Resolve's stabilizer */
 .st-alt { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; padding: 8px 10px; border-left: 3px solid #ff8c2a; background: rgba(255, 140, 42, .06); border-radius: 6px; }
+/* HandBrake Converter files */
+.hb-item { display: grid; grid-template-columns: 80px 1fr 150px; gap: 12px; align-items: start; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.hb-item:last-child { border-bottom: 0; }
+.hb-item .m { min-width: 0; word-break: break-all; user-select: text; }
+.hb-item .err { color: var(--bad); font-size: 12px; }
+.hb-kind { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
+.hb-item .bar { width: 100px; }

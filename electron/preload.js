@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('pilot', {
   shutdownNow: () => ipcRenderer.invoke('shutdown-now'),
   encoder: (action, args) => ipcRenderer.invoke('encoder', { action, args }),
   night: (action, args) => ipcRenderer.invoke('night', { action, args }),
+  handbrake: (action, args) => ipcRenderer.invoke('handbrake', { action, args }),
   pickFiles: (current) => ipcRenderer.invoke('pick-files', current),
   pickImage: () => ipcRenderer.invoke('pick-image'),
   // dropped files -> real paths (File.path no longer exists in Electron 32+)
@@ -53,6 +54,7 @@ contextBridge.exposeInMainWorld('pilot', {
   onEncoder: on('encoder'),
   onScene: on('scene'),
   onNight: on('night'),
+  onHandbrake: on('handbrake'),
   onRenders: on('renders'),
   onShutdown: on('shutdown'),
   onProjectProgress: on('project-progress'),

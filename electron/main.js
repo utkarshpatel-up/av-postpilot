@@ -14,6 +14,7 @@ const { collectHdFiles } = require('./hdreview');
 const { SceneQueue } = require('./scenequeue');
 const { NightQueue } = require('./nightqueue');
 const { Encoder } = require('./encoder');
+const { HandBrake, DEFAULTS: HANDBRAKE_DEFAULTS, presetName: handbrakePreset, findCli: findHandbrakeCli } = require('./handbrake');
 const { Stabilization } = require('./stabilization');
 const { createFrameGrabber } = require('./stabilization-frames');
 const { PremiereImport } = require('./premiere-import');
@@ -65,6 +66,7 @@ const DEFAULTS = {
   encoder: { afterQueue: 'nothing', shutdownSeconds: 60 },
   stab: { afterQueue: 'nothing', shutdownSeconds: 60, removeMarkers: false },
   night: { afterQueue: 'nothing', shutdownSeconds: 60 },
+  handbrake: HANDBRAKE_DEFAULTS,
   libraryBackup: libraryBackup.DEFAULTS,
   notify: {
     telegram: { enabled: false, chats: [] },
@@ -73,7 +75,7 @@ const DEFAULTS = {
     email: { enabled: false, user: '', recipients: [] },
     events: {
       renderDone: true, renderFailed: true, renderCopied: false, queueDone: true,
-      sceneDone: true, sceneQueueDone: true, encoderGroupDone: true, encoderQueueDone: true, stabQueueDone: true, nightQueueDone: true, shutdown: true, autosaveFailed: true, projectCreated: false,
+      sceneDone: true, sceneQueueDone: true, encoderGroupDone: true, encoderQueueDone: true, stabQueueDone: true, nightQueueDone: true, handbrakeDone: true, shutdown: true, autosaveFailed: true, projectCreated: false,
       libraryBackupDone: false, libraryBackupFailed: true, libraryAlert: true, libraryBackupOverdue: true,
     },
   },
@@ -104,6 +106,7 @@ function mergeSettings(s) {
     encoder: { ...DEFAULTS.encoder, ...(s.encoder || {}) },
     stab: { ...DEFAULTS.stab, ...(s.stab || {}) },
     night: { ...DEFAULTS.night, ...(s.night || {}) },
+    handbrake: { ...DEFAULTS.handbrake, ...(s.handbrake || {}) },
     libraryBackup: { ...DEFAULTS.libraryBackup, ...(s.libraryBackup || {}) },
     manual: { ...DEFAULTS.manual, ...(s.shutdownSeconds ? { shutdownSeconds: s.shutdownSeconds } : {}), ...(s.manual || {}) },
     renders: { ...DEFAULTS.renders, ...(s.shutdownSeconds ? { shutdownSeconds: s.shutdownSeconds } : {}), ...(s.renders || {}), hd: { ...DEFAULTS.renders.hd, ...(s.renders?.hd || {}) } },
@@ -267,7 +270,7 @@ function setSecret(kind, value) {
 const notifier = new Notifier({ getSettings: () => settings, getSecret, log, pc: os.hostname() });
 // Per-module "Do nothing" (Scene Cuts, Renders, Encoder, Stabilization): that module's
 // messages are not sent at all. Failures (renderFailed) and shutdown warnings still are.
-const MODULE_EVENTS = { scene: ['sceneDone', 'sceneQueueDone'], renders: ['renderDone', 'queueDone', 'renderCopied'], encoder: ['encoderGroupDone', 'encoderQueueDone'], stab: ['stabQueueDone'], night: ['nightQueueDone'] };
+const MODULE_EVENTS = { scene: ['sceneDone', 'sceneQueueDone'], renders: ['renderDone', 'queueDone', 'renderCopied'], encoder: ['encoderGroupDone', 'encoderQueueDone'], stab: ['stabQueueDone'], night: ['nightQueueDone'], handbrake: ['handbrakeDone'] };
 const sendNotice = notifier.notify.bind(notifier);
 notifier.notify = (event, ...rest) => {
   for (const [group, events] of Object.entries(MODULE_EVENTS)) if (events.includes(event) && settings[group]?.afterQueue === 'silent') return 0;
@@ -312,7 +315,7 @@ function afterQueue(action, what) {
   if (action !== 'shutdown') return;
   // While the night queue runs, only its own choice counts (at its end).
   if (night?.running && what !== 'night queue') return;
-  const group = { 'scene cut queue': 'scene', 'encoder queue': 'encoder', 'stabilization queue': 'stab', 'night queue': 'night' }[what] || 'renders';
+  const group = { 'scene cut queue': 'scene', 'encoder queue': 'encoder', 'stabilization queue': 'stab', 'night queue': 'night', 'HandBrake conversion': 'handbrake' }[what] || 'renders';
   const secs = countdown(settings[group].shutdownSeconds);
   scheduleShutdown(`${what} finished`, secs);
 }
@@ -427,6 +430,14 @@ const premiere = new PremiereImport({ bridge, link: premiereLink, log, dir: path
 const sceneQueue = new SceneQueue({
   bridge, notifier, log, getSettings: () => settings,
   onChange: () => { send('scene', sceneQueue.summary()); updateTray(); },
+  onQueueDone: afterQueue,
+});
+
+// HandBrake Converter: runs HandBrakeCLI on its own, Resolve is not involved.
+const handbrake = new HandBrake({
+  getSettings: () => settings.handbrake, log, notifier,
+  defaultReportDir: path.join(DATA, 'handbrake-reports'),
+  onChange: (h) => { send('handbrake', h); updateTray(); },
   onQueueDone: afterQueue,
 });
 
@@ -613,7 +624,7 @@ ipcMain.handle('library-backup', async (_e, action, options = {}) => {
 });
 ipcMain.handle('get-initial', () => ({
   settings, status, autosave: autosaver.summary(), log: logLines, platform: process.platform,
-  scene: sceneQueue.summary(), encoder: encoder.summary(), night: night.summary(), renders: renders.summary(), shutdownAt, shutdownReason,
+  scene: sceneQueue.summary(), encoder: encoder.summary(), night: night.summary(), handbrake: handbrake.summary(), renders: renders.summary(), shutdownAt, shutdownReason,
   pc: os.hostname(), version: app.getVersion(),
 }));
 ipcMain.handle('stabilize', async (_e, args) => {
@@ -878,6 +889,36 @@ ipcMain.handle('encoder', async (_e, { action, args }) => {
     return { ok: false, error: err.message };
   }
 });
+ipcMain.handle('handbrake', async (_e, { action, args = {} }) => {
+  try {
+    if (action === 'summary') return { ok: true, ...handbrake.summary() };
+    if (action === 'info') {
+      const h = settings.handbrake;
+      let preset = '', presetError = '';
+      if (h.presetFile) try { preset = handbrakePreset(h.presetFile); } catch (err) { presetError = err.message; }
+      return { ok: true, cli: findHandbrakeCli(h.cliPath), preset, presetError, defaultReportDir: path.join(DATA, 'handbrake-reports') };
+    }
+    if (action === 'preview') return { ok: true, ...handbrake.preview() };
+    if (action === 'start') {
+      // Answer straight away: a folder of satsangs can take all night.
+      const r = handbrake.start();
+      return Promise.race([r, new Promise((res) => setTimeout(() => res({ ok: true, started: true }), 300))]);
+    }
+    if (action === 'stop') { handbrake.stop(); return { ok: true }; }
+    if (action === 'pick-preset' || action === 'pick-cli') {
+      const preset = action === 'pick-preset';
+      const r = await dialog.showOpenDialog(win, {
+        title: preset ? 'Choose a preset exported from HandBrake' : 'Find HandBrakeCLI',
+        defaultPath: args.current || undefined, properties: ['openFile'],
+        filters: preset ? [{ name: 'HandBrake preset', extensions: ['json'] }] : process.platform === 'win32' ? [{ name: 'HandBrakeCLI', extensions: ['exe'] }] : [],
+      });
+      if (r.canceled) return { ok: true, path: null };
+      if (preset) handbrakePreset(r.filePaths[0]);   // throws if it is not a HandBrake preset export
+      return { ok: true, path: r.filePaths[0] };
+    }
+    return { ok: false, error: 'Unknown HandBrake action' };
+  } catch (err) { return { ok: false, error: err.message }; }
+});
 ipcMain.handle('pick-image', async () => {
   const r = await dialog.showOpenDialog(win, { title: 'Choose a colour bars picture', properties: ['openFile'], filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'tif', 'tiff', 'dpx', 'exr'] }] });
   return r.canceled ? null : r.filePaths[0];
@@ -990,6 +1031,7 @@ app.on('before-quit', e => {
   if (stabilization.running) { e.preventDefault(); log('warn', 'Stop after the current clip and wait for stabilization before quitting'); showWindow(); return; }
   if (encoder.running) { e.preventDefault(); log('warn', 'Stop Encoder and wait for the current file and project cleanup before quitting'); showWindow(); return; }
   if (databaseBackup.running) { e.preventDefault(); log('warn', 'Wait for the library backup to finish before quitting'); showWindow(); return; }
+  if (handbrake.running) { e.preventDefault(); log('warn', 'Stop the HandBrake conversion before quitting'); showWindow(); return; }
   quitting = true; bridge.stop();
 });
 app.on('window-all-closed', (e) => e.preventDefault());
