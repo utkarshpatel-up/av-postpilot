@@ -20,6 +20,7 @@ const { MediaPreview } = require('./media-preview');
 const HANDBRAKE_VERSION = require('../package.json').handbrakeCli.version;
 const { QuietLift, DEFAULTS: QUIET_LIFT_DEFAULTS, installScripts: installQuietLift } = require('./quietlift');
 const feedbackCutter = require('./feedbackcutter');
+const toResolve = require('./toresolve');
 const { Stabilization } = require('./stabilization');
 const { createFrameGrabber } = require('./stabilization-frames');
 const { PremiereImport } = require('./premiere-import');
@@ -74,6 +75,7 @@ const DEFAULTS = {
   handbrake: HANDBRAKE_DEFAULTS,
   quietLift: QUIET_LIFT_DEFAULTS,
   feedbackCutter: feedbackCutter.DEFAULTS,
+  toResolve: toResolve.DEFAULTS,
   libraryBackup: libraryBackup.DEFAULTS,
   notify: {
     telegram: { enabled: false, chats: [] },
@@ -116,6 +118,7 @@ function mergeSettings(s) {
     handbrake: { ...DEFAULTS.handbrake, ...(s.handbrake || {}) },
     quietLift: { ...DEFAULTS.quietLift, ...(s.quietLift || {}) },
     feedbackCutter: { ...DEFAULTS.feedbackCutter, ...(s.feedbackCutter || {}) },
+    toResolve: { ...DEFAULTS.toResolve, ...(s.toResolve || {}) },
     libraryBackup: { ...DEFAULTS.libraryBackup, ...(s.libraryBackup || {}) },
     manual: { ...DEFAULTS.manual, ...(s.shutdownSeconds ? { shutdownSeconds: s.shutdownSeconds } : {}), ...(s.manual || {}) },
     renders: { ...DEFAULTS.renders, ...(s.shutdownSeconds ? { shutdownSeconds: s.shutdownSeconds } : {}), ...(s.renders || {}), hd: { ...DEFAULTS.renders.hd, ...(s.renders?.hd || {}) } },
@@ -977,6 +980,12 @@ ipcMain.handle('quietlift', async (_e, { action, args = {} }) => {
   try {
     if (action === 'call') return { ok: true, data: await quietLift.call(args.cmd, args.payload) };
     if (action === 'restart') { quietLift.stop(); return { ok: true }; }
+    // after Render: into Resolve (bin, timeline, Fairlight page)
+    if (action === 'to-resolve') {
+      const r = await toResolve.sendToResolve({ file: args.path, name: args.name, chainImport: (a) => bridge.chainImport(a), opts: settings.toResolve });
+      log('info', `Quiet Lift: ${path.basename(r.file)} is on timeline "${r.timeline}" in bin "${r.bin}"`);
+      return { ok: true, ...r };
+    }
     if (action === 'reveal') { shell.showItemInFolder(args.path); return { ok: true }; }
     const WAV = [{ name: 'WAV audio', extensions: ['wav'] }, { name: 'All files', extensions: ['*'] }];
     if (action === 'pick-wav' || action === 'pick-exe') {

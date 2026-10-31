@@ -711,6 +711,12 @@
             <span class="track"></span><span>Debleed + lifted</span>
           </button>
         </div>
+        <div class="ab-group">
+          <span class="ab-label">Then</span>
+          <button class="ql-switch" id="ql-to-resolve" title="After Render: put the lifted file into a Resolve bin and timeline, then open Fairlight (settings: ⚙)">
+            <span class="track"></span><span>Send to Resolve</span>
+          </button>
+        </div>
         <div class="ab-group grow">
           <span class="ab-label">Output</span>
           <button class="path-field" id="ql-output-field"><svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span id="ql-output-text">Choose where to save</span></button>
@@ -733,6 +739,19 @@
         </div>
         <div class="drawer-body">
           <div id="ql-settings-body"></div>
+          <div class="set-group">
+            <div class="set-group-title">After Render: Resolve</div>
+            <div class="set">
+              <label for="ql-res-bin">Bin</label>
+              <div class="num-input"><input id="ql-res-bin" spellcheck="false" placeholder="Audio Chain"></div>
+              <p>Made in the open project if it isn't there.</p>
+            </div>
+            <div class="set">
+              <label for="ql-res-timeline">Timeline</label>
+              <div class="num-input"><select id="ql-res-timeline"><option value="new">New, named after the recording</option><option value="current">End of the current timeline</option></select></div>
+              <p>Resolve then opens the Fairlight page.</p>
+            </div>
+          </div>
           <div class="set-group">
             <div class="set-group-title">Engine</div>
             <div class="set">

@@ -68,6 +68,12 @@ function savePrefs(patch, delay = 0) {
   const write = () => save((s) => Object.assign(s.quietLift, structuredClone(patch)));
   if (delay) optionsTimer = setTimeout(write, delay); else write();
 }
+// After Render: into Resolve (electron/toresolve.js). Its own settings block.
+const resolvePrefs = () => settings.toResolve;
+function saveResolvePrefs(patch) {
+  Object.assign(settings.toResolve, patch);
+  save((s) => Object.assign(s.toResolve, patch));
+}
 
 // ---------- bridge to the Python engine ----------
 async function engine(cmd, payload) {
@@ -168,10 +174,13 @@ async function setFile(role, p) {
   updateButtons();
 }
 
+// "Talk-02 (fc-cleaned).wav" (saved by Feedback Cutter) -> "Talk-02"
+const recordingName = (p) => base(p).replace(/\.wav$/i, '').replace(/ \(fc-cleaned\)( \d+)?$/i, '');
+
 // 260910_0084-1-debleed.wav -> original 260910_0084-1.wav, other mic 260910_0084-2.wav
 async function guessCompanions(p) {
   const folder = dir(p);
-  const stem = base(p).replace(/\.wav$/i, '').replace(/[-_ ]?debleed$/i, '');
+  const stem = recordingName(p).replace(/[-_ ]?debleed$/i, '');
   const filled = [];
   const orig = join(folder, `${stem}.wav`);
   if (!S.files.original && orig.toLowerCase() !== p.toLowerCase() && (await exists(orig))) {
@@ -651,6 +660,7 @@ async function render() {
       { label: 'Show in folder', run: () => pilot.quietLift('reveal', { path: r.output }) });
     for (const msg of Object.values(r.marker_errors)) toast('Markers not added', msg, 'warn');
     renderMarkerStatus();
+    if (resolvePrefs().enabled) await toResolve(r.output, btn);
   } catch (e) {
     toast('Render failed', e.message, 'err');
   } finally {
@@ -660,6 +670,37 @@ async function render() {
     updateButtons();
   }
 }
+
+// The last step of the chain: the lifted file into a Resolve bin and timeline, then the Fairlight page.
+async function toResolve(file, btn) {
+  btn.querySelector('span').textContent = 'Sending to Resolve…';
+  log('Sending to Resolve…');
+  const r = await pilot.quietLift('to-resolve', { path: file, name: recordingName(S.files.input) });
+  if (!r.ok) return toast('Not sent to Resolve', r.error, 'err');
+  log(`In Resolve: ${base(r.file)} in bin "${r.bin}", timeline "${r.timeline}".`);
+  toast('In Resolve', `${base(r.file)} is in bin "${r.bin}" and on timeline "${r.timeline}".`, 'ok');
+}
+
+function renderResolveSwitch() {
+  const on = resolvePrefs().enabled;
+  $('ql-to-resolve').classList.toggle('on', on);
+  $('ql-to-resolve').lastElementChild.textContent = on ? 'Send to Resolve' : 'Off';
+  $('ql-res-bin').value = resolvePrefs().bin;
+  $('ql-res-timeline').value = resolvePrefs().timeline;
+}
+
+// Feedback Cutter's "Cleaned WAV…" hands its file over: a new debleed track, nothing kept from the last one.
+window.qlTakeFile = (p) => {
+  if (S.busy) return toast('Quiet Lift is busy', `Load ${base(p)} once it has finished.`, 'warn');
+  S.files.original = '';
+  S.files.other = '';
+  S.meta = {};
+  S.analysis = null;
+  S.rendered = null;
+  S.skipped = new Set();
+  renderResults();
+  setFile('input', p);
+};
 
 // ---------- wiring ----------
 function bind() {
@@ -697,6 +738,12 @@ function bind() {
     savePrefs({ markInput: !prefs().markInput });
     renderMarkSwitch();
   };
+  $('ql-to-resolve').onclick = () => {
+    saveResolvePrefs({ enabled: !resolvePrefs().enabled });
+    renderResolveSwitch();
+  };
+  $('ql-res-bin').onchange = () => saveResolvePrefs({ bin: $('ql-res-bin').value.trim() || 'Audio Chain' });
+  $('ql-res-timeline').onchange = () => saveResolvePrefs({ timeline: $('ql-res-timeline').value });
   $('ql-output-field').onclick = async () => {
     const p = await pick('save-wav', S.output || (S.files.input ? dir(S.files.input) : prefs().dir));
     if (p) { setOutput(p); updateButtons(); }
@@ -737,6 +784,7 @@ updateButtons();
 window.qlOpen = () => {
   renderEditor();
   renderMarkSwitch();
+  renderResolveSwitch();
   if (!S.started) { S.started = true; startEngine(); }
 };
 })();
