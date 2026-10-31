@@ -13,7 +13,8 @@ const hasEngine = (() => {
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'fc-'));
 
 // 16-bit mono WAV: 12 s of noise with a steady 3 kHz ring from 4 s to 7 s (feedback).
-function ringWav(file, sr = 22050) {
+// note: also a held 1100 Hz note with five overtones from 8 s to 11.5 s (not feedback).
+function ringWav(file, sr = 22050, { note = false } = {}) {
   const n = sr * 12;
   const data = Buffer.alloc(n * 2);
   let seed = 7;
@@ -21,7 +22,12 @@ function ringWav(file, sr = 22050) {
   for (let i = 0; i < n; i++) {
     const t = i / sr;
     const ring = t >= 4 && t < 7 ? 0.4 * Math.min(1, (t - 4) * 4, (7 - t) * 4) * Math.sin(2 * Math.PI * 3000 * t) : 0;
-    data.writeInt16LE(Math.round((0.05 * rnd() + ring) * 32767 * 0.9), i * 2);
+    let sung = 0;
+    if (note && t >= 8 && t < 11.5) {
+      for (let h = 1; h <= 6; h++) sung += 0.15 / h * Math.sin(2 * Math.PI * 1100 * h * t);
+      sung *= Math.min(1, (t - 8) * 20, (11.5 - t) * 20);
+    }
+    data.writeInt16LE(Math.round((0.05 * rnd() + ring + sung) * 32767 * 0.9), i * 2);
   }
   const h = Buffer.alloc(44);
   h.write('RIFF', 0); h.writeUInt32LE(36 + data.length, 4); h.write('WAVE', 8);
@@ -113,6 +119,21 @@ test('analyze finds the ring, re-notch and old jobs are cleared', { skip: !hasEn
     assert.notStrictEqual(r2.job, r.job);
     assert.ok(!fs.existsSync(r.dir), 'the previous job is removed');
     await assert.rejects(engine.call('renotch', { job: r.job, events: [] }), /gone/);
+  } finally {
+    engine.stop();
+  }
+});
+
+test("a held note's overtones are not ticked as feedback, the ring still is", { skip: !hasEngine && 'Python with numpy, scipy, soundfile, matplotlib not found', timeout: 180000 }, async () => {
+  const dir = tmp();
+  const input = path.join(dir, 'sung.wav');
+  ringWav(input, 22050, { note: true });
+  const engine = fc.createEngine({ script: fc.installScripts(path.join(dir, 'engine')), workDir: path.join(dir, 'work'), getPython: () => PYTHON });
+  try {
+    const r = await engine.call('analyze', { path: input });
+    const picked = r.events.filter((e) => e.selected);
+    assert.ok(picked.some((e) => Math.abs(e.freq - 3000) < 60), JSON.stringify(r.events));
+    assert.deepStrictEqual(picked.filter((e) => Math.abs(e.freq - 3000) >= 60), [], 'only the ring is ticked');
   } finally {
     engine.stop();
   }
