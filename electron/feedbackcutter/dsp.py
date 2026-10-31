@@ -23,7 +23,7 @@ from collections import deque
 
 # no console window flashing up for each ffmpeg call on Windows
 SUBPROCESS_OPTIONS = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, replace
 
 import threading
 
@@ -85,6 +85,8 @@ DEFAULTS = dict(
     # auto-cut, since cutting voice-band content risks the voice.
     auto_min_freq=1000.0,
     max_rel_spread=0.18,
+    auto_min_longest=0.5,  # ...and it rang unbroken this long at least once (s); stitched
+                           # quarter-second scraps of speech never do
     min_freq=150.0,      # ignore low rumble / stage thumps
     max_freq=None,       # default: min(nyquist, 12 kHz)
     notch_bw_hz=20.0,    # half-width of the deep core notch around the tracked freq
@@ -105,10 +107,14 @@ class Event:
     freq_lo: float = -1.0  # low/high edge of the frequency the tone wandered over
     freq_hi: float = -1.0
     manual: bool = False   # user-drawn region: notch its exact band, no auto-tracking
+    longest: float = -1.0  # longest unbroken stretch of the tone (s)
+    freq_dev: float = 0.0  # how far its pieces wander from `freq` (Hz, time-weighted std)
 
     def __post_init__(self):
         if self.active < 0:
             self.active = self.t_end - self.t_start
+        if self.longest < 0:
+            self.longest = self.t_end - self.t_start
         if self.freq_lo < 0:
             self.freq_lo = self.freq
         if self.freq_hi < 0:
@@ -119,13 +125,21 @@ class Event:
         return self.t_end - self.t_start
 
     @property
+    def stability(self):
+        """1 for a tone held at one pitch, falling to 0 as its pieces wander. Feedback
+        sits on a fixed frequency; speech harmonics only pass through, so pieces of
+        voice that the clustering stitched together spread over a few percent."""
+        lo = max(0.004 * self.freq, 6.0)
+        return float(np.clip((4 * lo - self.freq_dev) / (3 * lo), 0, 1))
+
+    @property
     def score(self):
         # feedback reads as a tone that is prominent AND persists at a fixed
         # frequency. Weight prominence and cumulative ring-time together, so a
         # faint-but-sustained ring outranks a loud, fleeting sung note.
         prom = np.clip((self.prom_db - 12) / 26, 0, 1)
         persist = np.clip(self.active / 3.0, 0, 1)
-        return int(np.clip((0.5 * prom + 0.5 * persist) * 100, 0, 100))
+        return int(np.clip((0.5 * prom + 0.5 * persist) * self.stability * 100, 0, 100))
 
     @property
     def severity(self):
@@ -135,6 +149,7 @@ class Event:
     def to_dict(self):
         d = asdict(self)
         d.update(duration=round(self.duration, 3), active=round(self.active, 3),
+                 longest=round(self.longest, 3), freq_dev=round(self.freq_dev, 1),
                  severity=self.severity, score=self.score,
                  t_start=round(self.t_start, 3), t_end=round(self.t_end, 3),
                  freq=round(self.freq, 1), prom_db=round(self.prom_db, 1))
@@ -197,18 +212,31 @@ def _inner_workers():
     return getattr(_INNER, "n", 1)
 
 
+def _median_cols(magdb, k):
+    """median_filter(magdb, (k, 1), mode='nearest'), one column at a time: scipy has a
+    fast running median for 1-D input only, ~20x quicker here than the 2-D filter
+    with a one-column kernel, for exactly the same values."""
+    cols = np.ascontiguousarray(magdb.T)
+    out = np.empty_like(cols)
+    for j, col in enumerate(cols):
+        out[j] = median_filter(col, size=k, mode="nearest")
+    return out.T
+
+
 def _median_env(magdb, size):
-    """median_filter(magdb, size, mode='nearest'), split over time-columns across
-    `_inner_workers()` threads. Identical output — the kernel spans no columns."""
+    """median_filter(magdb, size, mode='nearest') for a (k, 1) kernel, split over
+    time-columns across `_inner_workers()` threads. Identical output — the kernel
+    spans no columns."""
+    k = size[0]
     w = _inner_workers()
     cols = magdb.shape[1]
     if w <= 1 or cols < 2 * w:
-        return median_filter(magdb, size=size, mode="nearest")
+        return _median_cols(magdb, k)
     edges = np.linspace(0, cols, w + 1).astype(int)
     parts = [None] * w
 
     def work(i):
-        parts[i] = median_filter(magdb[:, edges[i]:edges[i + 1]], size=size, mode="nearest")
+        parts[i] = _median_cols(magdb[:, edges[i]:edges[i + 1]], k)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=w) as ex:
         list(ex.map(work, range(w)))
@@ -219,28 +247,46 @@ def detect_in_array(mono, sr, p, t_offset=0.0):
     f, t, Z = _stft(mono, sr, p)
     mag = np.abs(Z)
     magdb = 20 * np.log10(mag + 1e-9)
-    env = _median_env(magdb, (p["env_med_bins"], 1))
-    prom = magdb - env
 
     nyq = sr / 2
     maxf = p["max_freq"] or min(nyq, 12000.0)
-    fmask = (f >= p["min_freq"]) & (f <= maxf)
+    band = np.flatnonzero((f >= p["min_freq"]) & (f <= maxf))
+    if band.size == 0:
+        return []
+    b_lo, b_hi = band[0], band[-1] + 1
+
+    # The envelope is only worked out over the searched band (plus the median's reach),
+    # about half the spectrum at 48 kHz; the few harmonic checks beyond it get theirs
+    # from prom_rows, so every prominence is exactly what a full-height median gives.
+    nb, half = len(f), p["env_med_bins"] // 2
+    r0, r1 = max(0, b_lo - half), min(nb, b_hi + half)
+    env = _median_env(magdb[r0:r1], (p["env_med_bins"], 1))
+    v0, v1 = (r0 + half if r0 > 0 else 0), (r1 - half if r1 < nb else nb)
+
+    def prom_rows(a, b, s, e):
+        """magdb - envelope for bins a..b-1, frames s..e."""
+        if v0 <= a and b <= v1:
+            return magdb[a:b, s:e + 1] - env[a - r0:b - r0, s:e + 1]
+        return np.stack([magdb[r, s:e + 1] - np.median(magdb[np.clip(np.arange(r - half, r + half + 1), 0, nb - 1), s:e + 1], axis=0)
+                         for r in range(a, b)])
+
+    prom = prom_rows(b_lo, b_hi, 0, magdb.shape[1] - 1)   # the band; row i is bin b_lo + i
 
     # local maxima along frequency (a real tone is a ridge, not a shoulder)
     lm = np.zeros_like(mag, dtype=bool)
     lm[1:-1, :] = (mag[1:-1, :] >= mag[:-2, :]) & (mag[1:-1, :] >= mag[2:, :])
-    cand = (prom > p["prom_db"]) & lm & fmask[:, None]
+    cand = (prom > p["prom_db"]) & lm[b_lo:b_hi]
 
     frame_dt = (t[1] - t[0]) if len(t) > 1 else p["hop"] / sr
     min_frames = max(1, int(round(p["min_dur_ms"] / 1000 / frame_dt)))
     gap_frames = int(round(p["gap_ms"] / 1000 / frame_dt))
 
     raw = []  # (bin, start_frame, end_frame, max_prom)
-    active_bins = np.flatnonzero(cand.any(axis=1))
-    for b in active_bins:
-        for s, e in _runs_with_gap(np.flatnonzero(cand[b]), gap_frames):
+    active_rows = np.flatnonzero(cand.any(axis=1))
+    for i in active_rows:
+        for s, e in _runs_with_gap(np.flatnonzero(cand[i]), gap_frames):
             if e - s + 1 >= min_frames:
-                raw.append((b, s, e, float(prom[b, s:e + 1].max())))
+                raw.append((b_lo + i, s, e, float(prom[i, s:e + 1].max())))
 
     # merge events that overlap in time and sit within 2 freq bins of each other
     raw.sort(key=lambda r: (r[1], r[0]))
@@ -259,24 +305,38 @@ def detect_in_array(mono, sr, p, t_offset=0.0):
         else:
             merged.append(dict(b=b, s=s, e=e, pr=pr))
 
-    def partner_prom(fp, s, e):
-        """Max prominence near frequency fp during frames [s,e] (±1 bin)."""
-        if fp < f[0] or fp > f[-1]:
+    def partner_prom(fp, s, e, q=75):
+        """Prominence near frequency fp during frames [s,e] (±1 bin): its q-th percentile
+        over the frames, so q=100 is the peak and 75 what is held for most of the time."""
+        if fp < max(f[1], p["min_freq"] / 2) or fp > f[-1]:
             return -np.inf
         bp = int(np.argmin(np.abs(f - fp)))
-        return float(prom[max(0, bp - 1):bp + 2, s:e + 1].max())
+        held = prom_rows(max(0, bp - 1), min(nb, bp + 2), s, e).max(axis=0)
+        return float(held.max() if q == 100 else np.percentile(held, q))
 
-    events = []
-    for m in merged:
-        f0 = f[m["b"]]
+    def is_note(f0, s, e, level, skip=0):
         # feedback is a lone sinusoid; a musical note is the root of a harmonic
         # series. Treat this as a note only when an overtone both clears the floor
         # AND rivals the fundamental (within harm_rel_db) — a genuine series. A
         # lone howl 30+ dB above incidental energy at 2x/3x/4x stays feedback.
-        harmonic = max(partner_prom(2 * f0, m["s"], m["e"]),
-                       partner_prom(3 * f0, m["s"], m["e"]),
-                       partner_prom(4 * f0, m["s"], m["e"]))
-        if harmonic > p["harm_prom_db"] and harmonic >= m["pr"] - p["harm_rel_db"]:
+        harmonic = max(partner_prom(k * f0, s, e, 100) for k in (2, 3, 4) if k != skip)
+        return harmonic > p["harm_prom_db"] and harmonic >= level - p["harm_rel_db"]
+
+    def is_overtone(f0, s, e, level):
+        # an upper partial of a note (its 2nd..6th harmonic) is a lone line too: it is
+        # the note when a fundamental below rivals it and has overtones of its own
+        # besides this one (else the tone itself would make any stray energy at f0/2
+        # look like a note). A ring's own distortion harmonics stay in: their root is lone.
+        for k in range(2, 7):
+            root = partner_prom(f0 / k, s, e)   # held, not peak: speech crosses f0/k now and then
+            if root > max(p["harm_prom_db"], level - p["harm_rel_db"]) and is_note(f0 / k, s, e, root, skip=k):
+                return True
+        return False
+
+    events = []
+    for m in merged:
+        f0 = f[m["b"]]
+        if is_note(f0, m["s"], m["e"], m["pr"]) or is_overtone(f0, m["s"], m["e"], m["pr"]):
             continue
         events.append(Event(t_start=float(t[m["s"]]) + t_offset,
                             t_end=float(t[m["e"]]) + t_offset,
@@ -301,6 +361,7 @@ def merge_events(events, freq_tol_hz=30.0, time_gap_s=0.08):
             hit.t_start = min(hit.t_start, ev.t_start)
             hit.t_end = max(hit.t_end, ev.t_end)
             hit.prom_db = max(hit.prom_db, ev.prom_db)
+            hit.longest = hit.active = hit.duration   # overlapping pieces: one unbroken stretch
         else:
             out.append(ev)
     return out
@@ -327,6 +388,9 @@ def consolidate_events(events, freq_tol_hz=50.0, freq_tol_frac=0.0, bridge_s=2.0
         if hit:
             hit["t_end"] = max(hit["t_end"], ev.t_end)
             hit["active"] += ev.duration
+            hit["longest"] = max(hit["longest"], ev.longest)
+            hit["wf"] += ev.duration * ev.freq
+            hit["wf2"] += ev.duration * ev.freq ** 2
             hit["prom_db"] = max(hit["prom_db"], ev.prom_db)
             hit["freq"] = (hit["freq"] * hit["n"] + ev.freq) / (hit["n"] + 1)
             hit["flo"] = min(hit["flo"], ev.freq)
@@ -335,10 +399,17 @@ def consolidate_events(events, freq_tol_hz=50.0, freq_tol_frac=0.0, bridge_s=2.0
         else:
             clusters.append(dict(freq=ev.freq, t_start=ev.t_start, t_end=ev.t_end,
                                  active=ev.duration, prom_db=ev.prom_db,
-                                 flo=ev.freq, fhi=ev.freq, n=1))
+                                 flo=ev.freq, fhi=ev.freq, n=1, longest=ev.longest,
+                                 wf=ev.duration * ev.freq, wf2=ev.duration * ev.freq ** 2))
     return [Event(t_start=c["t_start"], t_end=c["t_end"], freq=c["freq"],
                   prom_db=c["prom_db"], active=c["active"],
-                  freq_lo=c["flo"], freq_hi=c["fhi"]) for c in clusters]
+                  freq_lo=c["flo"], freq_hi=c["fhi"], longest=c["longest"],
+                  freq_dev=_wstd(c)) for c in clusters]
+
+
+def _wstd(c):
+    w = max(c["active"], 1e-9)
+    return float(np.sqrt(max(0.0, c["wf2"] / w - (c["wf"] / w) ** 2)))
 
 
 # ----------------------------------------------------------------------- notch
@@ -620,7 +691,8 @@ def _auto_selected(ev, events, p):
     rel_spread = (ev.freq_hi - ev.freq_lo) / max(ev.freq, 1.0)
     return (ev.severity == "High"
             and ev.freq >= p["auto_min_freq"]
-            and rel_spread <= p["max_rel_spread"])
+            and rel_spread <= p["max_rel_spread"]
+            and ev.longest >= p["auto_min_longest"])
 
 
 # ---------------------------------------------------------------- streaming I/O
@@ -656,8 +728,11 @@ def _chunks(N, sr):
 
 
 def _mp3(src, dst):
-    """Small mono MP3 preview for the in-browser player (WAV stays for download)."""
-    subprocess.run([FFMPEG, "-y", "-i", src, "-ac", "1", "-b:a", "64k", dst],
+    """Small mono MP3 preview for the in-browser player (WAV stays for download).
+    Above 32 kHz it is resampled to 32 kHz: a 64k mono MP3 keeps nothing higher anyway
+    (and detection stops at 12 kHz), and the encode takes about a third less time."""
+    rate = ["-ar", "32000"] if sf.info(src).samplerate > 32000 else []
+    subprocess.run([FFMPEG, "-y", "-i", src, "-ac", "1", *rate, "-b:a", "64k", dst],
                    check=True, capture_output=True, **SUBPROCESS_OPTIONS)
 
 
@@ -747,11 +822,35 @@ def _notch_chunk(wav_path, sr, cs, ce, rs, re, selected, p, cols_per_s, want_ori
                  freq_hi=ev.get("freq_hi", ev["freq"]), manual=ev.get("manual", False))
            for ev in selected
            if ev["t_end"] > rs / sr and ev["t_start"] < re / sr]
-    seg_out = notch_segment(data, sr, seg, p) if seg else data
+    seg_out = _notch_spans(data, sr, seg, p) if seg else data
     o = data[cs - rs: cs - rs + (ce - cs)]
     c = seg_out[cs - rs: cs - rs + (ce - cs)]
     cc, tt = _coarse_cols(c.mean(1).astype("float32"), sr, cs / sr, cols_per_s, DISP_NFFT)
     return c, o - c, (o if want_original else None), cc, tt
+
+
+def _notch_spans(x, sr, events, p):
+    """notch_segment, transforming only the stretches the events reach instead of the
+    whole minute: a short ring costs a second of STFT, not sixty. Everywhere else the
+    gain is 1, so the audio there is the input itself. Each stretch starts on the
+    chunk's frame grid (a multiple of hop), so its frames are the same frames."""
+    n, hop = len(x), p["hop"]
+    reach = p["ramp_ms"] / 1000 + p["n_fft"] / sr     # farthest a touched frame's samples go
+    spans = []
+    for a, b in sorted((max(0, int((ev.t_start - reach) * sr)), min(n, int(np.ceil((ev.t_end + reach) * sr))))
+                       for ev in events):
+        if spans and a <= spans[-1][1] + p["n_fft"]:
+            spans[-1][1] = max(spans[-1][1], b)
+        else:
+            spans.append([a, b])
+    out = x.copy()
+    for a, b in spans:
+        a = a // hop * hop
+        t0 = a / sr
+        seg = [replace(ev, t_start=ev.t_start - t0, t_end=ev.t_end - t0) for ev in events
+               if ev.t_end + reach > t0 and ev.t_start - reach < b / sr]
+        out[a:b] = notch_segment(x[a:b], sr, seg, p)
+    return out
 
 
 def _stream_notch(wav_path, job_dir, sr, ch, N, dur, selected, p,

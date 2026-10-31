@@ -41,6 +41,22 @@ def clear_jobs(keep=None):
             shutil.rmtree(os.path.join(WORK, name), ignore_errors=True)
 
 
+def disk_full(e):
+    """A plain message when the work folder's drive is full, else None. libsndfile reports a failed
+    write only as "System error.", so the free space is checked instead of trusting the message."""
+    d = WORK
+    while not os.path.isdir(d) and os.path.dirname(d) != d:   # WORK itself may not exist yet
+        d = os.path.dirname(d)
+    try:
+        free = shutil.disk_usage(d).free
+    except OSError:
+        return None
+    if getattr(e, "errno", None) != 28 and free >= 256 * 2**20:
+        return None
+    return (f"The drive with Feedback Cutter's work folder ({WORK}) is full: {free // 2**20} MB free. "
+            "Free some space there and try again.")
+
+
 def job_dir(job):
     if not isinstance(job, str) or not JOB_RE.fullmatch(job):
         raise ValueError("bad job")
@@ -101,7 +117,10 @@ COMMANDS = {"check": cmd_check, "analyze": cmd_analyze, "renotch": cmd_renotch, 
 
 def main():
     sys.stdout.reconfigure(encoding="utf-8")
-    os.makedirs(WORK, exist_ok=True)
+    try:
+        os.makedirs(WORK, exist_ok=True)
+    except OSError:
+        pass   # e.g. the drive is full: analyze reports it, rather than the engine dying unexplained
     clear_jobs()   # left over from the last session: the page can't reopen them
     send({"type": "ready"})
     for line in sys.stdin:
@@ -114,7 +133,7 @@ def main():
             send({"id": rid, "type": "result", "data": COMMANDS[req["cmd"]](req, log)})
         except Exception as e:  # noqa: BLE001 - report every failure to the UI
             sys.stderr.write(traceback.format_exc())
-            send({"id": rid, "type": "error", "msg": str(e) or type(e).__name__})
+            send({"id": rid, "type": "error", "msg": disk_full(e) or str(e) or type(e).__name__})
 
 
 if __name__ == "__main__":
