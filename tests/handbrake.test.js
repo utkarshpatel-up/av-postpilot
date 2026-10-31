@@ -4,7 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { EventEmitter } = require('events');
-const { HandBrake, presetName, planConvert, planH264, plannedLister, lcsLen } = require('../electron/handbrake');
+const { HandBrake, presetName, planConvert, planH264, plannedLister, lcsLen, bundledCli } = require('../electron/handbrake');
 
 function tree(files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hb-'));
@@ -156,7 +156,8 @@ test('settings are checked before anything runs', async () => {
   assert.match((await run({ outputDir: '' })).error, /output folder/);
   assert.match((await run({ outputDir: path.join(root, 'In', 'Out') })).error, /inside the input/);
   assert.match((await run({ convertSatsangs: false })).error, /H264 recordings folder/);
-  if (!process.env.PATH.split(path.delimiter).some((d) => fs.existsSync(path.join(d, process.platform === 'win32' ? 'HandBrakeCLI.exe' : 'HandBrakeCLI')))) {
+  // only when no copy is around: not built in (npm run fetch-handbrake) and not on PATH
+  if (!bundledCli() && !process.env.PATH.split(path.delimiter).some((d) => fs.existsSync(path.join(d, process.platform === 'win32' ? 'HandBrakeCLI.exe' : 'HandBrakeCLI')))) {
     assert.match((await run({})).error, /HandBrakeCLI was not found/);
   }
 });

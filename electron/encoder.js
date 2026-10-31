@@ -35,6 +35,27 @@ function outputName(dir, file, suffix) {
   return name;
 }
 
+// Part of a file to export, picked in the range window: the first and last frame, both
+// included (like Premiere's in/out points), as frame numbers and as their start times.
+function checkRange(r) {
+  if (!r) return null;
+  const fps = Number(r.fps);
+  const a = Math.round(Number(r.inFrame));
+  const b = Math.round(Number(r.outFrame));
+  if (!(fps > 0) || !Number.isFinite(a) || !Number.isFinite(b) || a < 0 || b < a) throw new Error('Invalid range');
+  return { inFrame: a, outFrame: b, fps, inSec: a / fps, outSec: b / fps };
+}
+
+// 25 fps, frames 250-499 -> "00:00:10:00 – 00:00:19:24"
+function timecode(frame, fps) {
+  const base = Math.round(fps);
+  const f = frame % base;
+  const s = Math.floor(frame / base);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(Math.floor(s / 3600))}:${p(Math.floor(s / 60) % 60)}:${p(s % 60)}:${p(f)}`;
+}
+const rangeText = (r) => `${timecode(r.inFrame, r.fps)} – ${timecode(r.outFrame, r.fps)}`;
+
 class Encoder {
   constructor({ bridge, notifier, log, onChange, onQueueDone, getSettings, loadState, saveState, pollMs = 2000, confirmStart = async () => true }) {
     Object.assign(this, { bridge, notifier, log, onChange, onQueueDone, getSettings, saveState, pollMs });
@@ -98,6 +119,10 @@ class Encoder {
     const it = this.group(groupId).items.find((i) => i.id === itemId);
     if (!it) throw new Error('file not found');
     for (const k of ['preset', 'dir']) if (k in fields) it[k] = fields[k];
+    if ('range' in fields) {
+      if (it.state === 'encoding') throw new Error('This file is encoding right now');
+      it.range = checkRange(fields.range);
+    }
     if (fields.requeue && it.state !== 'encoding') Object.assign(it, { state: 'waiting', pct: 0, error: '', output: '' });
     this.changed();
   }
@@ -202,7 +227,8 @@ class Encoder {
       if (!fs.existsSync(it.file)) throw new Error('source file not found');
       if (!fs.existsSync(dir)) throw new Error(`output folder not reachable: ${dir}`);
       const name = outputName(dir, it.file, g.suffix);
-      const r = await this.bridge.encodeStart({ token: this.token, folder, timeline: `${folder} ${n}`, file: it.file, preset, dir, name });
+      const range = it.range ? { inSec: it.range.inSec, outSec: it.range.outSec } : {};
+      const r = await this.bridge.encodeStart({ token: this.token, folder, timeline: `${folder} ${n}`, file: it.file, preset, dir, name, ...range });
       if (r.fatal) this.stopping = true;
       if (!r.ok) throw new Error(r.error);
       this.ids.add(r.id);
@@ -220,7 +246,7 @@ class Encoder {
         misses = 0;
         if (s.status === 'Complete') {
           Object.assign(it, { state: 'done', pct: 100, output: s.dir && s.file ? path.join(s.dir, s.file) : '', tookMs: s.tookMs });
-          this.log('info', `Encoded ${path.basename(it.file)} → ${it.output} (${preset}, ${fmt(s.tookMs)})`);
+          this.log('info', `Encoded ${path.basename(it.file)}${it.range ? ` (${rangeText(it.range)})` : ''} → ${it.output} (${preset}, ${fmt(s.tookMs)})`);
           if (copyDir) {
             it.copyState = 'copying'; this.changed();
             try {
@@ -249,4 +275,4 @@ class Encoder {
   }
 }
 
-module.exports = { Encoder, listVideos, outputName, VIDEO };
+module.exports = { Encoder, listVideos, outputName, checkRange, timecode, VIDEO };

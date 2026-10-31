@@ -14,8 +14,8 @@ async function hbLoadInfo() {
   hbInfo = r;
   $('hb-report').placeholder = r.defaultReportDir;
   $('hb-cli').innerHTML = r.cli
-    ? `<span class="pill ok">Found</span> <span class="muted">${esc(r.cli)}</span>`
-    : '<span class="pill bad">Not found</span> <span class="muted">Install the command line version from handbrake.fr/downloads2.php, then choose HandBrakeCLI.exe here (or put it on PATH).</span>';
+    ? `<span class="pill ok">${r.builtIn ? 'Built in' : 'Found'}</span> <span class="muted">${r.builtIn ? `HandBrakeCLI ${esc(r.version || '')} comes with PostPilot` : esc(r.cli)}</span>`
+    : '<span class="pill bad">Not found</span> <span class="muted">HandBrakeCLI normally comes with PostPilot. Reinstall PostPilot, or choose HandBrakeCLI here.</span>';
   const pc = $('hb-preset-check');
   pc.className = `pill ${r.preset ? 'ok' : 'bad'}${settings.handbrake.presetFile ? '' : ' hidden'}`;
   pc.textContent = r.preset ? `Preset: ${r.preset.trim()}` : (r.presetError || 'Not a HandBrake preset');

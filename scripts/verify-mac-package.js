@@ -9,6 +9,10 @@ const archive = path.join(dir, 'Contents', 'Resources', 'app.asar');
 for (const name of ['library-backup.js', 'library-backup-headless.js', 'library-overdue.js']) {
   assert.ok(asar.extractFile(archive, `electron/${name}`).length > 0);
 }
+// HandBrakeCLI comes inside the app and must run on this Mac
+const hbCli = path.join(dir, 'Contents', 'Resources', 'handbrake', 'HandBrakeCLI');
+const hb = spawnSync(hbCli, ['--version'], { timeout: 30000, encoding: 'utf8' });
+assert.ok(/HandBrake \d/.test(`${hb.stdout}${hb.stderr}`), hb.error?.message || hb.stderr);
 const data = path.resolve('dist', 'mac-startup-check'); fs.mkdirSync(data, { recursive: true });
 fs.writeFileSync(path.join(data, 'settings.json'), JSON.stringify({ libraryBackup: { mode: 'monitor', root: '' } }));
 const run = spawnSync(path.join(dir, 'Contents', 'MacOS', 'AV PostPilot'), ['--library-backup-run', `--backup-user-data=${data}`], { timeout: 30000, encoding: 'utf8' });
