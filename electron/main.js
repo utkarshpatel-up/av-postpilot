@@ -3,6 +3,7 @@ const { execFile, spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const url = require('url');
 const { ResolveBridge } = require('./resolve-bridge');
 const { AutoSaver } = require('./autosave');
 const ps = require('./project-setup');
@@ -14,7 +15,11 @@ const { collectHdFiles } = require('./hdreview');
 const { SceneQueue } = require('./scenequeue');
 const { NightQueue } = require('./nightqueue');
 const { Encoder } = require('./encoder');
-const { HandBrake, DEFAULTS: HANDBRAKE_DEFAULTS, presetName: handbrakePreset, findCli: findHandbrakeCli } = require('./handbrake');
+const { HandBrake, DEFAULTS: HANDBRAKE_DEFAULTS, presetName: handbrakePreset, findCli: findHandbrakeCli, bundledCli } = require('./handbrake');
+const { MediaPreview } = require('./media-preview');
+const HANDBRAKE_VERSION = require('../package.json').handbrakeCli.version;
+const { QuietLift, DEFAULTS: QUIET_LIFT_DEFAULTS, installScripts: installQuietLift } = require('./quietlift');
+const feedbackCutter = require('./feedbackcutter');
 const { Stabilization } = require('./stabilization');
 const { createFrameGrabber } = require('./stabilization-frames');
 const { PremiereImport } = require('./premiere-import');
@@ -67,6 +72,8 @@ const DEFAULTS = {
   stab: { afterQueue: 'nothing', shutdownSeconds: 60, removeMarkers: false },
   night: { afterQueue: 'nothing', shutdownSeconds: 60 },
   handbrake: HANDBRAKE_DEFAULTS,
+  quietLift: QUIET_LIFT_DEFAULTS,
+  feedbackCutter: feedbackCutter.DEFAULTS,
   libraryBackup: libraryBackup.DEFAULTS,
   notify: {
     telegram: { enabled: false, chats: [] },
@@ -107,6 +114,8 @@ function mergeSettings(s) {
     stab: { ...DEFAULTS.stab, ...(s.stab || {}) },
     night: { ...DEFAULTS.night, ...(s.night || {}) },
     handbrake: { ...DEFAULTS.handbrake, ...(s.handbrake || {}) },
+    quietLift: { ...DEFAULTS.quietLift, ...(s.quietLift || {}) },
+    feedbackCutter: { ...DEFAULTS.feedbackCutter, ...(s.feedbackCutter || {}) },
     libraryBackup: { ...DEFAULTS.libraryBackup, ...(s.libraryBackup || {}) },
     manual: { ...DEFAULTS.manual, ...(s.shutdownSeconds ? { shutdownSeconds: s.shutdownSeconds } : {}), ...(s.manual || {}) },
     renders: { ...DEFAULTS.renders, ...(s.shutdownSeconds ? { shutdownSeconds: s.shutdownSeconds } : {}), ...(s.renders || {}), hd: { ...DEFAULTS.renders.hd, ...(s.renders?.hd || {}) } },
@@ -372,7 +381,13 @@ const renders = new RenderWatcher({
 const encoder = new Encoder({
   confirmStart: async (project) => {
     if (!project || night?.running) return true;   // the night queue asked when it was started
-    const result = await dialog.showMessageBox(win, {
+    const untitled = /^Untitled Project/i.test(project.name || '');
+    const result = untitled ? await dialog.showMessageBox(win, {
+      type: 'warning', title: 'Encode in a temporary project?',
+      message: `Close "${project.name}" to start encoding?`,
+      detail: 'This project has never been saved. If it is empty, PostPilot leaves it unsaved and encodes in a separate temporary project. If it has anything in it, encoding will not start; save it with a name in Resolve first.',
+      buttons: ['Start encoding', 'Cancel'], defaultId: 1, cancelId: 1,
+    }) : await dialog.showMessageBox(win, {
       type: 'warning', title: 'Encode in a temporary project?',
       message: `Save and close "${project.name}" to start encoding?`,
       detail: 'PostPilot will automatically save and close your project, then encode in a separate empty temporary project. When the queue finishes or stops, it will delete the temporary project.',
@@ -439,6 +454,25 @@ const handbrake = new HandBrake({
   defaultReportDir: path.join(DATA, 'handbrake-reports'),
   onChange: (h) => { send('handbrake', h); updateTray(); },
   onQueueDone: afterQueue,
+});
+
+// Encoder range window: frame rate + preview copies, made with the built-in HandBrakeCLI.
+const mediaPreview = new MediaPreview({ dir: path.join(DATA, 'previews'), findCli: () => findHandbrakeCli(settings.handbrake.cliPath) });
+
+// Quiet Lift: its Python engine starts the first time the page uses it.
+const quietLift = new QuietLift({
+  script: installQuietLift(path.join(DATA, 'quietlift')),
+  getPython: () => process.env.QUIET_LIFT_PYTHON || settings.quietLift.python,
+  onLog: (msg) => { log('info', `Quiet Lift: ${msg}`); send('quietlift', { log: msg }); },
+});
+
+// Feedback Cutter: also Python, also started the first time its page is opened.
+const FEEDBACK_WORK = path.join(DATA, 'feedbackcutter', 'work');
+const feedback = feedbackCutter.createEngine({
+  script: feedbackCutter.installScripts(path.join(DATA, 'feedbackcutter')),
+  workDir: FEEDBACK_WORK,
+  getPython: () => process.env.FEEDBACK_CUTTER_PYTHON || settings.feedbackCutter.python,
+  onLog: (msg, { pct }) => send('feedback', { log: msg, pct }),
 });
 
 const night = new NightQueue({
@@ -564,7 +598,11 @@ function send(channel, payload) {
 
 function applySettings(next) {
   const before = settings.autosave;
+  const python = settings.quietLift.python;
+  const fcPython = settings.feedbackCutter.python;
   settings = mergeSettings(next);
+  if (python !== settings.quietLift.python) quietLift.stop();
+  if (fcPython !== settings.feedbackCutter.python) feedback.stop();
   writeJson(SETTINGS_FILE, settings);
   if (before.enabled !== settings.autosave.enabled || before.intervalMin !== settings.autosave.intervalMin) {
     autosaver.schedule();
@@ -896,7 +934,8 @@ ipcMain.handle('handbrake', async (_e, { action, args = {} }) => {
       const h = settings.handbrake;
       let preset = '', presetError = '';
       if (h.presetFile) try { preset = handbrakePreset(h.presetFile); } catch (err) { presetError = err.message; }
-      return { ok: true, cli: findHandbrakeCli(h.cliPath), preset, presetError, defaultReportDir: path.join(DATA, 'handbrake-reports') };
+      const cli = findHandbrakeCli(h.cliPath);
+      return { ok: true, cli, builtIn: Boolean(cli) && cli === bundledCli(), version: HANDBRAKE_VERSION, preset, presetError, defaultReportDir: path.join(DATA, 'handbrake-reports') };
     }
     if (action === 'preview') return { ok: true, ...handbrake.preview() };
     if (action === 'start') {
@@ -917,6 +956,104 @@ ipcMain.handle('handbrake', async (_e, { action, args = {} }) => {
       return { ok: true, path: r.filePaths[0] };
     }
     return { ok: false, error: 'Unknown HandBrake action' };
+  } catch (err) { return { ok: false, error: err.message }; }
+});
+ipcMain.handle('enc-preview', async (_e, { action, file }) => {
+  try {
+    if (action === 'probe') {
+      const info = await mediaPreview.probe(file);
+      const copy = mediaPreview.existing(file);
+      return { ok: true, ...info, url: url.pathToFileURL(file).href, previewUrl: copy ? url.pathToFileURL(copy).href : null };
+    }
+    if (action === 'make') {
+      const copy = await mediaPreview.make(file, (pct) => send('enc-preview', { file, pct }));
+      return { ok: true, url: url.pathToFileURL(copy).href };
+    }
+    if (action === 'cancel') { mediaPreview.cancel(); return { ok: true }; }
+    return { ok: false, error: 'Unknown preview action' };
+  } catch (err) { return { ok: false, error: err.message }; }
+});
+ipcMain.handle('quietlift', async (_e, { action, args = {} }) => {
+  try {
+    if (action === 'call') return { ok: true, data: await quietLift.call(args.cmd, args.payload) };
+    if (action === 'restart') { quietLift.stop(); return { ok: true }; }
+    if (action === 'reveal') { shell.showItemInFolder(args.path); return { ok: true }; }
+    const WAV = [{ name: 'WAV audio', extensions: ['wav'] }, { name: 'All files', extensions: ['*'] }];
+    if (action === 'pick-wav' || action === 'pick-exe') {
+      const exe = action === 'pick-exe';
+      const r = await dialog.showOpenDialog(win, {
+        title: exe ? 'Find the audio editor' : 'Choose a WAV file', defaultPath: args.current || undefined, properties: ['openFile'],
+        filters: exe ? (process.platform === 'win32' ? [{ name: 'Programs', extensions: ['exe'] }] : []) : WAV,
+      });
+      return { ok: true, path: r.canceled ? null : r.filePaths[0] };
+    }
+    if (action === 'save-wav') {
+      const r = await dialog.showSaveDialog(win, { title: 'Save the lifted file', defaultPath: args.current || undefined, filters: WAV });
+      return { ok: true, path: r.canceled ? null : r.filePath };
+    }
+    return { ok: false, error: 'Unknown Quiet Lift action' };
+  } catch (err) { return { ok: false, error: err.message }; }
+});
+// args: job, name (file in the job folder), source (the recording), suffix. Returns the saved path or null.
+async function saveFeedbackFile(args) {
+  const file = feedbackCutter.jobFile(FEEDBACK_WORK, args.job, args.name);
+  const ext = path.extname(args.name).slice(1);
+  const r = await dialog.showSaveDialog(win, {
+    title: 'Save', defaultPath: path.join(path.dirname(args.source), feedbackCutter.exportName(args.source, args.suffix, ext)),
+    filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
+  });
+  if (r.canceled) return null;
+  await fs.promises.copyFile(file, r.filePath);
+  log('info', `Feedback Cutter: saved ${r.filePath}`);
+  if (feedbackUnsaved && args.job === feedbackUnsaved.job && args.name === feedbackUnsaved.name) {
+    feedbackUnsaved = null;
+    send('feedback', { saved: true });
+  }
+  return r.filePath;
+}
+// Cleaned audio exists only in the work folder until it is saved, and that folder is emptied
+// when another recording is opened or PostPilot starts again. True = go ahead (saved or discarded).
+let feedbackUnsaved = null, feedbackAsking = false;
+async function askFeedbackUnsaved(question, discardLabel) {
+  if (!feedbackUnsaved) return true;
+  showWindow();
+  if (feedbackAsking) return false;   // already asking (Quit clicked twice)
+  feedbackAsking = true;
+  try { return await askFeedbackSave(question, discardLabel); } finally { feedbackAsking = false; }
+}
+async function askFeedbackSave(question, discardLabel) {
+  const { response } = await dialog.showMessageBox(win, {
+    type: 'warning', buttons: ['Save cleaned WAV…', discardLabel, 'Cancel'], defaultId: 0, cancelId: 2, noLink: true,
+    title: 'Feedback Cutter', message: `The cleaned audio of ${path.basename(feedbackUnsaved.source)} is not saved.`,
+    detail: `${question} The cleaned audio will be lost.`,
+  });
+  if (response === 2) return false;
+  if (response === 0) {
+    try {
+      if (!(await saveFeedbackFile({ ...feedbackUnsaved, suffix: 'cleaned' }))) return false;
+    } catch (err) { dialog.showErrorBox('Save failed', err.message); return false; }
+  }
+  feedbackUnsaved = null;
+  return true;
+}
+ipcMain.handle('feedback', async (_e, { action, args = {} }) => {
+  try {
+    if (action === 'call') return { ok: true, data: await feedback.call(args.cmd, args.payload) };
+    if (action === 'restart') { feedback.stop(); return { ok: true }; }
+    if (action === 'url') return { ok: true, url: url.pathToFileURL(feedbackCutter.jobFile(FEEDBACK_WORK, args.job, args.name)).href };
+    if (action === 'pick-audio') {
+      const r = await dialog.showOpenDialog(win, {
+        title: 'Choose a recording', defaultPath: args.current || undefined, properties: ['openFile'],
+        filters: [{ name: 'Audio', extensions: ['wav', 'mp3', 'flac', 'm4a', 'aif', 'aiff', 'aac', 'ogg', 'wma'] }, { name: 'All files', extensions: ['*'] }],
+      });
+      return { ok: true, path: r.canceled ? null : r.filePaths[0] };
+    }
+    if (action === 'export') return { ok: true, path: await saveFeedbackFile(args) };
+    // the cleaned audio the page has not saved yet ({ job, name, source } or null)
+    if (action === 'unsaved') { feedbackUnsaved = args.unsaved || null; return { ok: true }; }
+    if (action === 'confirm-discard') return { ok: true, go: await askFeedbackUnsaved('Open another recording anyway?', 'Open without saving') };
+    if (action === 'reveal') { shell.showItemInFolder(args.path); return { ok: true }; }
+    return { ok: false, error: 'Unknown Feedback Cutter action' };
   } catch (err) { return { ok: false, error: err.message }; }
 });
 ipcMain.handle('pick-image', async () => {
@@ -1032,7 +1169,16 @@ app.on('before-quit', e => {
   if (encoder.running) { e.preventDefault(); log('warn', 'Stop Encoder and wait for the current file and project cleanup before quitting'); showWindow(); return; }
   if (databaseBackup.running) { e.preventDefault(); log('warn', 'Wait for the library backup to finish before quitting'); showWindow(); return; }
   if (handbrake.running) { e.preventDefault(); log('warn', 'Stop the HandBrake conversion before quitting'); showWindow(); return; }
-  quitting = true; bridge.stop();
+  if (quietLift.busy) { e.preventDefault(); log('warn', 'Wait for Quiet Lift to finish before quitting'); showWindow(); return; }
+  if (feedback.busy) { e.preventDefault(); log('warn', 'Wait for Feedback Cutter to finish before quitting'); showWindow(); return; }
+  // (not in scripted developer checks: nobody is there to answer)
+  if (feedbackUnsaved && !process.env.AVPP_SCREENSHOT) {
+    e.preventDefault();
+    quitting = false;   // closing the window hides it again while the question is open
+    askFeedbackUnsaved('Quit anyway?', 'Quit without saving').then((go) => { if (go) { quitting = true; app.quit(); } });
+    return;
+  }
+  quitting = true; bridge.stop(); quietLift.stop(); feedback.stop();
 });
 app.on('window-all-closed', (e) => e.preventDefault());
 

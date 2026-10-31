@@ -245,3 +245,33 @@ test('render watcher ignores encoder jobs: no episode copy, HD pass or render sh
   assert.deepStrictEqual(sent, []);
   assert.deepStrictEqual(after, []);
 });
+
+test('a range picked for a file is passed to Resolve as the start times of its first and last frame', async () => {
+  const src = tmp(), out = tmp();
+  for (const f of ['a.mov', 'b.mov']) touch(path.join(src, f));
+  const bridge = fakeBridge();
+  const { e, state } = makeEncoder(bridge);
+  const g = e.addGroup({ preset: 'H264', dir: out });
+  e.addPaths(g.id, [path.join(src, 'a.mov'), path.join(src, 'b.mov')]);
+  e.updateItem(g.id, g.items[0].id, { range: { inFrame: 250, outFrame: 499, fps: 25 } });
+  assert.deepStrictEqual(state().groups[0].items[0].range, { inFrame: 250, outFrame: 499, fps: 25, inSec: 10, outSec: 19.96 });
+  await e.start();
+  assert.strictEqual(bridge.calls.start[0].inSec, 10);
+  assert.strictEqual(bridge.calls.start[0].outSec, 19.96);
+  assert.ok(!('inSec' in bridge.calls.start[1]));   // no range: the whole file
+  // requeue keeps the range; clearing it exports the whole file again
+  e.updateItem(g.id, g.items[0].id, { requeue: true });
+  assert.ok(e.groups[0].items[0].range);
+  e.updateItem(g.id, g.items[0].id, { range: null });
+  assert.strictEqual(e.groups[0].items[0].range, null);
+});
+
+test('ranges are checked and shown as timecode', () => {
+  const { checkRange, timecode } = require('../electron/encoder');
+  assert.throws(() => checkRange({ inFrame: 10, outFrame: 5, fps: 25 }), /Invalid range/);
+  assert.throws(() => checkRange({ inFrame: 0, outFrame: 5, fps: 0 }), /Invalid range/);
+  assert.strictEqual(checkRange(null), null);
+  assert.strictEqual(timecode(250, 25), '00:00:10:00');
+  assert.strictEqual(timecode(90000 + 59, 25), '01:00:02:09');
+  assert.strictEqual(timecode(1799, 29.97), '00:00:59:29');
+});

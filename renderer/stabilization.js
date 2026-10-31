@@ -1,7 +1,7 @@
 /* global pilot, $, esc, toast */
 const stNav = document.createElement('button');
 stNav.className = 'nav'; stNav.dataset.page = 'stabilization';
-stNav.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 3h6v2H5v4H3zm12 0h6v6h-2V5h-4zM3 15h2v4h4v2H3zm16 0h2v6h-6v-2h4zM7 11h10v2H7z"/></svg>Stabilization';
+stNav.innerHTML = '<svg viewBox="0 0 24 24"><path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/><circle cx="12" cy="12" r="3"/></svg>Stabilization';
 document.querySelector('.nav[data-page="episodes"]').before(stNav);
 stNav.addEventListener('click', () => go('stabilization'));
 let st = { clips: [], running: false }, stKey = '', stPreview = null, stPreviewRequest = 0, stLoadedFrame = -1;

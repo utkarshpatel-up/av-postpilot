@@ -19,15 +19,28 @@ const until = (t) => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
 
-let toastTimer;
-function toast(msg, bad = false) {
-  const el = $('toast');
-  el.textContent = msg;
-  el.classList.toggle('bad', bad);
-  el.classList.remove('hidden');
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.add('hidden'), 4500);
+const TOAST_ICONS = {
+  ok: '<path d="m5 12 5 5 9-10"/>',
+  err: '<path d="M12 8v5M12 16.5v.5"/><circle cx="12" cy="12" r="9"/>',
+  warn: '<path d="M12 8v5M12 16.5v.5"/><circle cx="12" cy="12" r="9"/>',
+  info: '<path d="M12 11v5M12 7.5v.5"/><circle cx="12" cy="12" r="9"/>',
+};
+// Stacked toasts: a bold title, an optional second line and an optional action button.
+function showToast(title, msg = '', kind = 'info', action = null) {
+  const t = document.createElement('div');
+  t.className = `toast ${kind}`;
+  t.innerHTML = `<div class="t-icon"><svg viewBox="0 0 24 24">${TOAST_ICONS[kind]}</svg></div><div class="t-msg"><b>${esc(title)}</b>${esc(msg)}</div>`;
+  if (action) {
+    const b = document.createElement('button');
+    b.className = 't-act';
+    b.textContent = action.label;
+    b.onclick = action.run;
+    t.appendChild(b);
+  }
+  $('toasts').appendChild(t);
+  setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 250); }, kind === 'err' ? 9000 : 5000);
 }
+const toast = (msg, bad = false) => showToast(msg, '', bad ? 'err' : 'ok');
 
 async function save(mutate) {
   const next = structuredClone(settings);
@@ -54,6 +67,8 @@ function go(page) {
   if (page === 'scene' && status.connected && status.project) loadSceneTimelines();
   if (page === 'night' && typeof nLoadLists === 'function') nLoadLists();
   if (page === 'handbrake' && typeof hbRenderForm === 'function') hbRenderForm();
+  if (page === 'quietlift' && typeof qlOpen === 'function') qlOpen();
+  if (page === 'feedback' && typeof fcOpen === 'function') fcOpen();
   if (page === 'episodes') {
     $('e-project').textContent = status.project?.name || 'no project open';
     if (status.connected && status.project) loadSeries();
@@ -1164,9 +1179,24 @@ function encStatus(it) {
   return '<span class="state">Waiting</span>';
 }
 
+// Frame number -> HH:MM:SS:FF (same counting as the range window)
+function rangeTimecode(frame, fps) {
+  const base = Math.round(fps) || 25;
+  const s = Math.floor(frame / base);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(Math.floor(s / 3600))}:${p(Math.floor(s / 60) % 60)}:${p(s % 60)}:${p(frame % base)}`;
+}
+
+// In – Out of a range (both frames included) and its length
+function encRangeText(r) {
+  const n = r.outFrame - r.inFrame + 1;
+  const s = n / r.fps;
+  return `${rangeTimecode(r.inFrame, r.fps)} – ${rangeTimecode(r.outFrame, r.fps)} (${s >= 60 ? `${Math.floor(s / 60)} min ${Math.round(s % 60)} s` : `${s.toFixed(1)} s`})`;
+}
+
 function renderEncoder() {
   const key = JSON.stringify(enc.groups.map((g) => [g.id, g.name, g.preset, g.dir, g.suffix, g.copyEnabled, g.copyDir,
-    g.items.map((i) => [i.id, i.preset, i.dir, i.state === 'encoding'])]));
+    g.items.map((i) => [i.id, i.preset, i.dir, i.state === 'encoding', i.range && [i.range.inFrame, i.range.outFrame]])]));
   const box = $('enc-groups');
   const typing = document.activeElement && box.contains(document.activeElement) && document.activeElement.matches('input[type="text"]');
   if (key !== encStructure && !typing) {
@@ -1187,16 +1217,16 @@ function renderEncoder() {
         </div>
         <div class="enc-copy"><label><input type="checkbox" class="g-copy-enabled" ${g.copyEnabled ? 'checked' : ''}> Copy finished files</label><div class="enc-path ${g.copyEnabled ? '' : 'hidden'}"><input type="text" class="g-copy-dir" value="${esc(g.copyDir || '')}" placeholder="Copy destination folder" ${g.copyEnabled ? '' : 'disabled'}><button class="btn g-copy-browse" ${g.copyEnabled ? '' : 'disabled'}>Browse…</button></div></div>
         ${g.items.length ? `<table class="enc">
-          <colgroup><col style="width:34%"><col style="width:22%"><col style="width:24%"><col style="width:13%"><col style="width:7%"></colgroup>
+          <colgroup><col style="width:33%"><col style="width:21%"><col style="width:22%"><col style="width:13%"><col style="width:11%"></colgroup>
           <thead><tr><th>File</th><th>Preset</th><th>Output folder</th><th>Status</th><th></th></tr></thead>
           <tbody>${g.items.map((it) => `
             <tr data-i="${it.id}">
-              <td class="fname" title="${esc(it.file)}">${esc(it.file.split(/[\\/]/).pop())}<small class="i-info">${esc(it.output ? `→ ${it.output}` : it.info || it.file)}</small></td>
+              <td class="fname" title="${esc(it.file)}">${esc(it.file.split(/[\\/]/).pop())}<small class="i-info">${esc(it.output ? `→ ${it.output}` : it.info || it.file)}</small>${it.range ? `<span class="i-range" title="Only this part is exported (In and Out frames included)">✂ ${esc(encRangeText(it.range))}</span>` : ''}</td>
               <td><select class="i-preset" ${it.state === 'encoding' ? 'disabled' : ''}>${presetOptions(it.preset, g.preset ? `Group: ${g.preset}` : 'Group preset')}</select></td>
               <td><div class="out">${it.dir ? `<span title="${esc(it.dir)}">${esc(it.dir)}</span><button class="btn icon i-dir-reset" title="Use the group folder">↺</button>` : `<span class="inherit">Group folder</span>`}
                 <button class="btn icon i-dir" title="Own output folder">…</button></div></td>
               <td class="state-cell">${encStatus(it)}</td>
-              <td>${it.state === 'encoding' ? '' : `${it.state !== 'waiting' ? '<button class="btn icon i-requeue" title="Encode again">↻</button>' : ''}<button class="btn icon i-del" title="Remove">✕</button>`}</td>
+              <td>${it.state === 'encoding' ? '' : `<button class="btn icon i-range-btn${it.range ? ' on' : ''}" title="${it.range ? 'Change the part to export' : 'Export only part of this file'}">✂</button>${it.state !== 'waiting' ? '<button class="btn icon i-requeue" title="Encode again">↻</button>' : ''}<button class="btn icon i-del" title="Remove">✕</button>`}</td>
             </tr>`).join('')}</tbody></table>`
           : '<div class="enc-empty">Drop video files or folders here, or use + Files / + Folder</div>'}
       </div>`).join('')
@@ -1271,6 +1301,9 @@ $('enc-groups').addEventListener('click', async (e) => {
     if (p) encCall('updateItem', { group: g, id: itemOf(b), fields: { dir: p } });
   } else if (b.classList.contains('i-dir-reset')) {
     encCall('updateItem', { group: g, id: itemOf(b), fields: { dir: '' } });
+  } else if (b.classList.contains('i-range-btn')) {
+    const it = grp?.items.find((i) => i.id === itemOf(b));
+    if (it) openRange(g, it);
   } else if (b.classList.contains('i-requeue')) {
     encCall('updateItem', { group: g, id: itemOf(b), fields: { requeue: true } });
   } else if (b.classList.contains('i-del')) {

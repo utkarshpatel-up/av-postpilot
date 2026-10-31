@@ -65,6 +65,7 @@ ZIP, macOS DMGs for Apple Silicon (arm64) and Intel (x64), plus SHA-256 checksum
 | **Renders** | Copies each finished render, optional HD review pass (one temporary timeline, individual clips, cleaned up afterwards), shutdown with countdown |
 | **Night Queue** | Steps in order (scene cuts, stabilization, render jobs, Encoder queue), unattended, one finish choice |
 | **Encoder** | Media-Encoder-style queue with Resolve presets in a disposable project; optional copy of finished files |
+| **Feedback Cutter** | Finds feedback rings in a speech recording and notches them out: spectrogram with numbered rings, tick/untick or draw your own, A/B listen, save the cleaned WAV and Audition markers |
 | **Clip Info** (window) | Always-on-top box with the clip under the playhead; Settings switch, tray, Ctrl+Alt+I |
 | **Notifications** | ntfy phone push, Gmail email to personal/office recipients, Telegram and legacy WhatsApp (Whapi.Cloud) |
 
@@ -312,6 +313,31 @@ templates for proactive alerts; it is not implemented in this version.
 `dev/` holds probe and live-test scripts that drive a running Resolve.
 `AVPP_SCREENSHOT=<folder>` with `AVPP_PAGES=dashboard,renders,…` saves screenshots of pages;
 `AVPP_USERDATA=<folder>` runs a separate copy with its own settings.
+
+## Feedback Cutter
+The Feedback Cutter app's engine (`electron/feedbackcutter/dsp.py`, copied from that
+project) behind its own page. Open or drop a recording: every sustained, pure tone
+that stands out of the speech is listed and marked on the spectrogram; strong rings
+above 1 kHz are ticked for cutting, the rest are there to tick by ear. Sensitivity
+works live on the analyzed file, **Apply** re-notches the ticked events, and **Save**
+writes `<name> (fc-cleaned).wav` (same bit depth as the source), the removed part,
+Audition markers or an events CSV next to the recording.
+
+If you open another recording or quit with the cleaned audio not saved, PostPilot asks
+first (Save cleaned WAV… / discard / Cancel): working files are kept in AppData
+`feedbackcutter\work` only for the file that is open (a two-hour recording needs a few
+GB there) and are removed when PostPilot starts again.
+
+**Nothing to install on Windows:** the Windows builds carry the engine frozen with
+Python, numpy, scipy, soundfile, matplotlib and FFmpeg (`resources\feedback-engine`,
+about 240 MB unpacked). `npm run dist:win` / `dist:zip` build it first with
+`scripts/build-feedback-engine.js` (PyInstaller, versions pinned in
+`scripts/feedback-engine-requirements.txt`), which needs **Python 3 on the build PC**
+only; it is rebuilt when `dsp.py`, the bridge or the package list change. From source,
+`npm run build-feedback-engine` once. The Mac build has no built-in engine: there the
+page uses `python3` with those packages. A Python path set on the page always wins over
+the built-in engine. The VST3 effects chain of the standalone app is not included.
+Tests: `FEEDBACK_CUTTER_PYTHON=<python> npm test` (the built-in engine is tested when built).
 
 ## Resolve quirks handled (found in live tests)
 - Imported clips don't come back in order: clips are sorted by `Clip-NN`.

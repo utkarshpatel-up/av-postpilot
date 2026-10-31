@@ -544,8 +544,18 @@ local function encbegin(a)
   end
   if original then
     if original:IsRenderingInProgress() then return { ok = false, error = 'Wait for the current render to finish' } end
-    if pm:SaveProject() ~= true then return { ok = false, error = 'Resolve could not save your project. Encoding was not started.' } end
-    if pm:CloseProject(original) ~= true then return { ok = false, error = 'Resolve could not close your saved project' } end
+    -- Saving a never-saved "Untitled Project" makes Resolve ask for a name and wait.
+    -- An empty one is Resolve's placeholder (it can't be closed); the temporary project
+    -- simply replaces it. One with work in it must be saved by the user.
+    if string.find(original:GetName() or '', '^Untitled Project') then
+      local root = original:GetMediaPool():GetRootFolder()
+      if (original:GetTimelineCount() or 0) > 0 or #(root:GetClipList() or {}) > 0 or #(root:GetSubFolderList() or {}) > 0 then
+        return { ok = false, error = '"' .. original:GetName() .. '" has never been saved. Save it with a name in Resolve (File > Save Project), then start Encoder again.' }
+      end
+    else
+      if pm:SaveProject() ~= true then return { ok = false, error = 'Resolve could not save your project. Encoding was not started.' } end
+      if pm:CloseProject(original) ~= true then return { ok = false, error = 'Resolve could not close your saved project' } end
+    end
   end
   local created, p = pcall(function() return pm:CreateProject(a.name) end)
   if not created or not p then
@@ -608,7 +618,18 @@ local function encstart(a)
   if not placed or #placed == 0 then return { ok = false, error = 'could not place the file on the timeline' } end
   if not applyPreset(p, a.preset) then return { ok = false, error = 'could not load preset "' .. a.preset .. '"' } end
   p:SetCurrentRenderMode(1)                             -- single clip
-  p:SetRenderSettings({ SelectAllFrames = true, TargetDir = a.dir, CustomName = a.name })
+  local render = { SelectAllFrames = true, TargetDir = a.dir, CustomName = a.name }
+  -- A range picked in PostPilot: start times of the first and last frame, both included (like Premiere's in/out).
+  if a.inSec and a.outSec then
+    local rate = tonumber(tl:GetSetting('timelineFrameRate')) or tonumber(fps) or 25
+    local start = tl:GetStartFrame()
+    local last = tl:GetEndFrame() - 1
+    local mi = math.min(last, start + math.floor(a.inSec * rate + 0.5))
+    local mo = math.min(last, start + math.floor(a.outSec * rate + 0.5))
+    if mo < mi then return { ok = false, error = 'the selected range is empty' } end
+    render = { SelectAllFrames = false, MarkIn = mi, MarkOut = mo, TargetDir = a.dir, CustomName = a.name }
+  end
+  p:SetRenderSettings(render)
   local id = p:AddRenderJob()
   if previous then p:SetCurrentTimeline(previous) end
   if not id then return { ok = false, error = 'Resolve could not add the render job' } end

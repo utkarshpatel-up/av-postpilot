@@ -2,7 +2,7 @@
 // Premiere Import page: report from the .prproj, XML import into Resolve, fix-ups.
 const prNav = document.createElement('button');
 prNav.className = 'nav'; prNav.dataset.page = 'premiere';
-prNav.innerHTML = '<svg viewBox="0 0 24 24"><path d="M4 3h11l5 5v13H4zm10 1.5V9h4.5zM8 12v6h2v-2h1.5a2 2 0 0 0 0-4zm2 1.5h1.4a.5.5 0 0 1 0 1H10z"/></svg>Premiere Import';
+prNav.innerHTML = '<svg viewBox="0 0 24 24"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M12 18v-6M9 15l3 3 3-3"/></svg>Premiere Import';
 document.querySelector('.nav[data-page="newproject"]').after(prNav);
 prNav.addEventListener('click', () => go('premiere'));
 

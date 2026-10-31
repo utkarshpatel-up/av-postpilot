@@ -132,8 +132,19 @@ function plannedLister(dirs) {
 }
 
 // HandBrakeCLI: the chosen path, next to PostPilot, on PATH or in the usual install folders.
+// HandBrakeCLI ships inside PostPilot: resources/handbrake in the installed app,
+// vendor/handbrake/<win|mac> when run from source (npm run fetch-handbrake puts it there).
+function bundledCli(exe = process.platform === 'win32' ? 'HandBrakeCLI.exe' : 'HandBrakeCLI') {
+  const os = { win32: 'win', darwin: 'mac' }[process.platform] || 'linux';
+  const dirs = [process.resourcesPath && path.join(process.resourcesPath, 'handbrake'), path.join(__dirname, '..', 'vendor', 'handbrake', os)];
+  return dirs.filter(Boolean).map((d) => path.join(d, exe)).find((p) => fs.existsSync(p)) || null;
+}
+
 function findCli(chosen, env = process.env) {
   const exe = process.platform === 'win32' ? 'HandBrakeCLI.exe' : 'HandBrakeCLI';
+  if (chosen && fs.existsSync(chosen)) return chosen;
+  const builtIn = bundledCli(exe);
+  if (builtIn) return builtIn;
   const dirs = [
     ...(env.PATH || '').split(path.delimiter),
     path.dirname(process.execPath),
@@ -201,7 +212,7 @@ class HandBrake {
     }
     const preset = presetName(cfg.presetFile);
     const cli = findCli(s.cliPath);
-    if (needCli && !cli) throw Error('HandBrakeCLI was not found. Install it from handbrake.fr (the command line version) or choose HandBrakeCLI.exe on this page.');
+    if (needCli && !cli) throw Error('HandBrakeCLI was not found. It normally comes with PostPilot; reinstall PostPilot or choose HandBrakeCLI on this page.');
     return { cfg, cli, preset };
   }
 
@@ -374,4 +385,4 @@ class HandBrake {
   }
 }
 
-module.exports = { HandBrake, DEFAULTS, presetName, planConvert, planH264, plannedLister, findCli, lcsLen };
+module.exports = { bundledCli, HandBrake, DEFAULTS, presetName, planConvert, planH264, plannedLister, findCli, lcsLen };
