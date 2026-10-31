@@ -16,6 +16,7 @@ from source; the app's resources/ folder when installed, where the build copies 
 import glob
 import json
 import os
+import shutil
 import subprocess
 import sys
 import traceback
@@ -163,8 +164,22 @@ def cmd_render(req, log):
     if out in inputs:
         raise ValueError("Output can't be one of the input files.")
     skipped = set(req.get("skipped") or [])
+    # The output is the input's format, so about its size. Checked first: a full drive otherwise
+    # leaves a cut-off file (with no markers) and only libsndfile's "System error."
+    need = os.path.getsize(a.args.input) + 64 * 2**20
+    free = shutil.disk_usage(os.path.dirname(out)).free + (os.path.getsize(out) if os.path.isfile(out) else 0)
+    if free < need:
+        raise ValueError(f"Not enough space for {os.path.basename(out)}: it needs about {need // 2**20} MB "
+                         f"and {os.path.splitdrive(out)[0] or os.path.dirname(out)} has {free // 2**20} MB free.")
     log(f"Rendering {len(a.stretches) - len(skipped)} stretch(es), skipping {len(skipped)}...")
-    ql.render(a, out, ql.gain_curve(a, skipped))
+    try:
+        ql.render(a, out, ql.gain_curve(a, skipped))
+    except Exception:
+        try:
+            os.remove(out)   # half a file would pass for a finished render
+        except OSError:
+            pass
+        raise
     log(f"Wrote {out}")
     errors = {"output": write_markers(a, out, skipped, log)}
     if req.get("mark_input", True):
