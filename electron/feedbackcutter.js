@@ -27,7 +27,8 @@ function jobFile(workDir, job, name) {
 }
 
 // "Talk Clip-02.mp3" + cleaned -> "Talk Clip-02 (fc-cleaned).wav", next to the source
-const exportName = (source, suffix, ext) => `${path.basename(source).replace(/\.[^.]+$/, '')} (fc-${suffix}).${ext}`;
+// (split on both separators: path.basename on a Mac keeps a whole Windows path)
+const exportName = (source, suffix, ext) => `${source.split(/[\\/]/).pop().replace(/\.[^.]+$/, '')} (fc-${suffix}).${ext}`;
 
 // The engine built into the app (scripts/build-feedback-engine.js): resources/feedback-engine when
 // installed, vendor/feedback-engine/<win> from source. '' when there is none (Mac, or not built).
