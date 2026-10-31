@@ -9,9 +9,10 @@
     "prestart": "node scripts/fetch-handbrake.js",
     "test": "node --test tests/*.test.js",
     "fetch-handbrake": "node scripts/fetch-handbrake.js",
-    "predist:win": "node scripts/fetch-handbrake.js win",
+    "build-feedback-engine": "node scripts/build-feedback-engine.js",
+    "predist:win": "node scripts/fetch-handbrake.js win && node scripts/build-feedback-engine.js",
     "dist:win": "electron-builder --win nsis --x64",
-    "predist:zip": "node scripts/fetch-handbrake.js win",
+    "predist:zip": "node scripts/fetch-handbrake.js win && node scripts/build-feedback-engine.js",
     "dist:zip": "electron-builder --win zip --x64 -c.win.artifactName=AV-PostPilot-${version}-Windows-Portable.${ext}",
     "predist:mac": "node scripts/fetch-handbrake.js mac",
     "dist:mac": "electron-builder --mac dmg --x64 --arm64 --publish never"
@@ -42,7 +43,13 @@
         }
       ],
       "icon": "build/icon.ico",
-      "artifactName": "AV-PostPilot-${version}-Windows-Setup.${ext}"
+      "artifactName": "AV-PostPilot-${version}-Windows-Setup.${ext}",
+      "extraResources": [
+        {
+          "from": "vendor/feedback-engine/win/feedback-engine",
+          "to": "feedback-engine/feedback-engine"
+        }
+      ]
     },
     "mac": {
       "target": "dmg",

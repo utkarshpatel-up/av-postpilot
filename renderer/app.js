@@ -68,6 +68,7 @@ function go(page) {
   if (page === 'night' && typeof nLoadLists === 'function') nLoadLists();
   if (page === 'handbrake' && typeof hbRenderForm === 'function') hbRenderForm();
   if (page === 'quietlift' && typeof qlOpen === 'function') qlOpen();
+  if (page === 'feedback' && typeof fcOpen === 'function') fcOpen();
   if (page === 'episodes') {
     $('e-project').textContent = status.project?.name || 'no project open';
     if (status.connected && status.project) loadSeries();

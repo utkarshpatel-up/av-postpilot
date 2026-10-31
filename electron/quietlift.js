@@ -17,9 +17,14 @@ function installScripts(dir) {
   return path.join(dir, 'quiet_lift_bridge.py');
 }
 
+// Also runs the Feedback Cutter engine (feedbackcutter.js): same protocol, its own name and arguments.
+// getExe: a frozen engine (Python built in) to run instead of python + script, or '' for none.
 class QuietLift {
-  constructor({ script, getPython = () => '', onLog = () => {} }) {
+  constructor({ script, args = [], name = 'Quiet Lift', getPython = () => '', getExe = () => '', onLog = () => {} }) {
     this.script = script;
+    this.getExe = getExe;
+    this.args = args;
+    this.name = name;
     this.getPython = getPython;
     this.onLog = onLog;
     this.proc = null;
@@ -29,8 +34,9 @@ class QuietLift {
   }
 
   start() {
-    const python = this.getPython() || defaultPython();
-    const proc = spawn(python, ['-u', this.script], { windowsHide: true });
+    const exe = this.getExe();
+    const python = exe || this.getPython() || defaultPython();
+    const proc = spawn(python, exe ? this.args : ['-u', this.script, ...this.args], { windowsHide: true });
     this.proc = proc;
     proc.stdin.on('error', () => {});   // writing after it died: 'exit' reports that
     let stderr = '';
@@ -38,11 +44,11 @@ class QuietLift {
     this.ready = new Promise((resolve, reject) => {
       proc.once('error', (e) => {
         if (this.proc === proc) this.proc = null;
-        reject(new Error(`Could not start Python (${python}): ${e.message}`));
+        reject(new Error(`Could not start ${exe ? `the ${this.name} engine` : 'Python'} (${python}): ${e.message}`));
       });
       // Exiting before "ready" (e.g. numpy missing) must fail the waiting calls, not leave them hanging.
       proc.on('exit', (code) => {
-        const err = new Error(`Quiet Lift engine stopped (code ${code}). ${lastLine(stderr)}`.trim());
+        const err = new Error(`${this.name} engine stopped (code ${code}). ${lastLine(stderr)}`.trim());
         reject(err);
         if (this.proc !== proc) return;   // stopped on purpose: stop() already answered its calls
         this.proc = null;
@@ -54,7 +60,7 @@ class QuietLift {
         if (msg.type === 'ready') return resolve();
         const p = this.pending.get(msg.id);
         if (!p) return;
-        if (msg.type === 'log') this.onLog(msg.msg);
+        if (msg.type === 'log') this.onLog(msg.msg, msg);
         else {
           this.pending.delete(msg.id);
           msg.type === 'result' ? p.resolve(msg.data) : p.reject(new Error(msg.msg));
@@ -81,7 +87,7 @@ class QuietLift {
     const proc = this.proc;
     this.proc = null;
     proc?.kill();
-    this.failAll(new Error('Quiet Lift engine was restarted'));
+    this.failAll(new Error(`${this.name} engine was restarted`));
   }
 
   failAll(err) {
