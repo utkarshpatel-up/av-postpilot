@@ -314,15 +314,6 @@ templates for proactive alerts; it is not implemented in this version.
 `AVPP_SCREENSHOT=<folder>` with `AVPP_PAGES=dashboard,renders,…` saves screenshots of pages;
 `AVPP_USERDATA=<folder>` runs a separate copy with its own settings.
 
-## Resolve quirks handled (found in live tests)
-- Imported clips don't come back in order: clips are sorted by `Clip-NN`.
-- Timeline names must be unique in a project.
-- Loading the render preset that's already selected is ignored: switch away first.
-- While rendering, Resolve doesn't report the open library; between jobs it briefly reports "not rendering" (15 s settle).
-- Individual-clips renders add a frame number to file names; web presets can't render individual clips.
-- Fusion comp frame 0 is the clip's first frame on the timeline (`COMPN_GlobalStart` is the source start).
-- The Tracker tool's first tracker is IntelliTrack, which drifts slowly; PostPilot adds classic point trackers.
-- Scripts cannot move the playhead while the Fusion page is open: PostPilot returns to the Edit page first.
 ## Feedback Cutter
 The Feedback Cutter app's engine (`electron/feedbackcutter/dsp.py`, copied from that
 project) behind its own page. Open or drop a recording: every sustained, pure tone
@@ -339,7 +330,7 @@ GB there) and are removed when PostPilot starts again.
 
 **Nothing to install on Windows:** the Windows builds carry the engine frozen with
 Python, numpy, scipy, soundfile, matplotlib and FFmpeg (`resources\feedback-engine`,
-about 150 MB). `npm run dist:win` / `dist:zip` build it first with
+about 240 MB unpacked). `npm run dist:win` / `dist:zip` build it first with
 `scripts/build-feedback-engine.js` (PyInstaller, versions pinned in
 `scripts/feedback-engine-requirements.txt`), which needs **Python 3 on the build PC**
 only; it is rebuilt when `dsp.py`, the bridge or the package list change. From source,
@@ -348,6 +339,15 @@ page uses `python3` with those packages. A Python path set on the page always wi
 the built-in engine. The VST3 effects chain of the standalone app is not included.
 Tests: `FEEDBACK_CUTTER_PYTHON=<python> npm test` (the built-in engine is tested when built).
 
+## Resolve quirks handled (found in live tests)
+- Imported clips don't come back in order: clips are sorted by `Clip-NN`.
+- Timeline names must be unique in a project.
+- Loading the render preset that's already selected is ignored: switch away first.
+- While rendering, Resolve doesn't report the open library; between jobs it briefly reports "not rendering" (15 s settle).
+- Individual-clips renders add a frame number to file names; web presets can't render individual clips.
+- Fusion comp frame 0 is the clip's first frame on the timeline (`COMPN_GlobalStart` is the source start).
+- The Tracker tool's first tracker is IntelliTrack, which drifts slowly; PostPilot adds classic point trackers.
+- Scripts cannot move the playhead while the Fusion page is open: PostPilot returns to the Edit page first.
 - Opening a clip on the Fusion page creates an empty comp; empty comps don't count as Fusion work.
 - Stabilizer settings of `TimelineItem:Stabilize()` can't be set by script (defaults are used) or reset by script.
 - Approving copies Fusion stabilization with `ExportFusionComp` / `ImportFusionComp`.
