@@ -2,11 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: file:; media-src 'self' file:">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; media-src 'self' file:">
   <title>AV PostPilot</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="quietlift.css">
-  <link rel="stylesheet" href="feedback.css">
 </head>
 <body>
   <aside class="sidebar">
@@ -38,8 +37,6 @@
         <svg viewBox="0 0 24 24"><rect x="3" y="5" width="11" height="14" rx="2"/><path d="M3 9h11M3 15h11M17 9l4 3-4 3"/></svg>HandBrake<span class="soon hidden" id="nav-hb-badge"></span></button>
       <button class="nav" data-page="quietlift">
         <svg viewBox="0 0 24 24"><path d="M4 15v3M8 12v6M12 9v9"/><path d="M18 18V5m0 0-3.5 3.5M18 5l3.5 3.5"/></svg>Quiet Lift</button>
-      <button class="nav" data-page="feedback">
-        <svg viewBox="0 0 24 24"><path d="M2 12h3l2-5 2 10 2-5h2"/><path d="M16 4v16M16 9h5M16 15h5"/></svg>Feedback Cutter</button>
       <button class="nav" data-page="notify">
         <svg viewBox="0 0 24 24"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>Notifications</button>
       <button class="nav" data-page="librarybackup">
@@ -749,151 +746,6 @@
       </aside>
     </section>
 
-    <!-- ================================================= Feedback Cutter -->
-    <section class="page" id="page-feedback">
-      <h1>Feedback Cutter</h1>
-      <p class="lead">Open a speech recording (talk, satsang) and every feedback ring is found and notched out. Check the list, listen before/after, then save the cleaned WAV.</p>
-
-      <div class="fc-top">
-        <div class="drop" id="fc-drop">
-          <svg viewBox="0 0 24 24"><path d="M12 16V4M12 4l-4 4M12 4l4 4"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/></svg>
-          <span class="big">Drop a recording here, or click to choose</span>
-          <span class="muted small">WAV, MP3, FLAC, M4A. Read straight from disk, so 2-hour files are fine.</span>
-        </div>
-        <div class="card fc-controls">
-          <div class="row"><label for="fc-sens">Detection sensitivity</label><input type="range" id="fc-sens" min="10" max="40" value="22" step="1"><span class="cval" id="fc-sensval">22 dB</span></div>
-          <p class="muted small" style="margin:-4px 0 6px">Lower catches fainter rings (more false hits). Higher keeps only strong feedback. Changes apply live to an analyzed file.</p>
-          <div class="row"><label for="fc-spec">Spectrogram detail</label><select id="fc-spec"><option value="pooled">Pooled (fast)</option><option value="max">Maximum (slower on long files)</option></select></div>
-          <div class="row"><label for="fc-python">Python</label><input type="text" id="fc-python" class="grow" placeholder="blank = built-in engine" spellcheck="false" title="Only to run the engine with another Python (needs numpy, scipy, soundfile, matplotlib, imageio-ffmpeg)"></div>
-          <div class="engine"><span class="dot" id="fc-engine-dot"></span><span id="fc-engine">Engine not started</span></div>
-        </div>
-      </div>
-
-      <div class="err" id="fc-err" hidden></div>
-      <div class="progress" id="fc-progress" hidden>
-        <div class="bar"><i id="fc-barfill"></i></div>
-        <div class="plabel" id="fc-plabel">Starting…</div>
-      </div>
-
-      <div class="results" id="fc-results" hidden>
-        <div class="summary" id="fc-summary"></div>
-
-        <div class="card">
-          <div class="nowfile"><span class="fname" id="fc-fname"></span><span class="fmeta" id="fc-fmeta"></span></div>
-          <div class="row" style="margin-top:12px">
-            <div class="seg" id="fc-toggle">
-              <button data-src="original" class="active">Original</button>
-              <button data-src="cleaned">Cleaned</button>
-              <button data-src="removed">What was removed</button>
-            </div>
-            <span style="flex:1"></span>
-            <div class="seg" id="fc-pmode" title="Continuous plays the whole file; Loop selection repeats just the selected event">
-              <button data-mode="continuous" class="active">Continuous</button>
-              <button data-mode="loop">Loop selection</button>
-            </div>
-          </div>
-          <div class="transport">
-            <button class="play" id="fc-play">▶</button>
-            <div class="scrub"><div class="marks" id="fc-marks"></div><input type="range" id="fc-scrub" min="0" max="1000" value="0"></div>
-            <div class="time" id="fc-time">0:00 / 0:00</div>
-          </div>
-          <p class="muted small" style="margin:10px 0 0">Switching keeps the position, so toggle mid-ring to hear the difference. Space = play/pause. Click an event to jump to it; in Loop selection it repeats just that ring.</p>
-          <audio id="fc-audio" preload="auto"></audio>
-        </div>
-
-        <div class="workspace">
-          <div class="speccol">
-            <div class="card">
-              <div class="spechdr">
-                <div class="card-label">Original, feedback marked (numbers match the list)</div>
-                <div class="spectools">
-                  <div class="zoomctl">
-                    <button type="button" id="fc-zoom-out" title="Zoom out">−</button>
-                    <span class="zl" id="fc-zoom-label">1.0×</span>
-                    <button type="button" id="fc-zoom-in" title="Zoom in">+</button>
-                    <button type="button" class="fit" id="fc-zoom-fit" title="Fit to width">Fit</button>
-                  </div>
-                  <button type="button" class="btn draw" id="fc-draw">Draw a feedback region</button>
-                </div>
-              </div>
-              <div class="spec-frame">
-                <div class="freqaxis" id="fc-freq-axis"></div>
-                <div class="spec-scroll" id="fc-spec-scroll">
-                  <div class="spec-wrap" id="fc-spec-wrap">
-                    <img id="fc-spec-before" alt="Spectrogram of the original">
-                    <div class="overlay" id="fc-overlay"></div>
-                    <div class="playhead" id="fc-playhead" hidden><div class="grip"></div><div class="cap"></div></div>
-                  </div>
-                </div>
-              </div>
-              <div class="timeaxis" id="fc-time-axis"></div>
-              <div class="spechint">Ctrl + scroll to zoom · drag or Shift + scroll to pan · zoom in to draw precisely</div>
-            </div>
-            <div class="card after">
-              <div class="card-label">Cleaned, feedback notched out</div>
-              <img id="fc-spec-after" alt="Spectrogram of the cleaned audio">
-            </div>
-          </div>
-
-          <aside class="listcol">
-            <div class="tablehead">
-              <div class="card-label">Detected events</div>
-              <button class="btn primary apply" id="fc-apply">Apply ↻</button>
-            </div>
-            <div class="filters" id="fc-filters">
-              <div class="fgroup">
-                <span class="flabel">Band <button type="button" class="miniedit" id="fc-band-edit" title="Edit frequency ranges">✎</button></span>
-                <span class="chip active" data-band="Low">Low<span class="cnt"></span></span>
-                <span class="chip active" data-band="Low-mid">Low-mid<span class="cnt"></span></span>
-                <span class="chip active" data-band="Mid">Mid<span class="cnt"></span></span>
-                <span class="chip active" data-band="High">High<span class="cnt"></span></span>
-              </div>
-              <div class="fgroup">
-                <span class="flabel">Severity</span>
-                <span class="chip active" data-sev="High">High<span class="cnt"></span></span>
-                <span class="chip active" data-sev="Med">Med<span class="cnt"></span></span>
-                <span class="chip active" data-sev="Low">Low<span class="cnt"></span></span>
-              </div>
-            </div>
-            <div class="listctl">
-              <label><input type="checkbox" id="fc-check-all"> tick all shown</label>
-              <span id="fc-tickcount"></span>
-            </div>
-            <div class="evlist" id="fc-evlist"></div>
-          </aside>
-        </div>
-
-        <div class="card">
-          <div class="card-head"><div class="card-label">Save</div><span class="small muted" id="fc-save-state"></span></div>
-          <div class="downloads">
-            <button class="btn primary" data-fc-export="cleaned">Cleaned WAV…</button>
-            <button class="btn" data-fc-export="markers">Audition markers…</button>
-            <button class="btn" data-fc-export="events_csv">Events CSV…</button>
-            <button class="btn" data-fc-export="removed">Removed-only WAV…</button>
-          </div>
-          <p class="muted small" style="margin:10px 0 0">Saved next to the recording by default, e.g. "Talk (fc-cleaned).wav". The cleaned WAV keeps the source's bit depth. Apply first if the button above is orange.</p>
-        </div>
-      </div>
-
-      <div class="modal-bg" id="fc-band-modal" hidden>
-        <div class="modal">
-          <h3>Frequency band ranges</h3>
-          <p class="muted small" style="margin:0 0 12px">Where each pitch category begins (Hz). Events are grouped by these for the Band filters.</p>
-          <div class="bandrow"><span class="bname" style="--c:var(--ok)">Low</span><span class="brange">20 Hz →&nbsp;<input type="number" id="fc-b1" min="20" step="10"> Hz</span></div>
-          <div class="bandrow"><span class="bname" style="--c:var(--warn)">Low-mid</span><span class="brange"><b id="fc-b1m"></b> Hz →&nbsp;<input type="number" id="fc-b2" step="10"> Hz</span></div>
-          <div class="bandrow"><span class="bname" style="--c:var(--accent-2)">Mid</span><span class="brange"><b id="fc-b2m"></b> Hz →&nbsp;<input type="number" id="fc-b3" step="50"> Hz</span></div>
-          <div class="bandrow"><span class="bname" style="--c:var(--bad)">High</span><span class="brange"><b id="fc-b3m"></b> Hz → 20 kHz</span></div>
-          <div class="modal-err" id="fc-band-err"></div>
-          <div class="modal-actions">
-            <button class="btn" id="fc-band-defaults">Restore defaults</button>
-            <span style="flex:1"></span>
-            <button class="btn" id="fc-band-cancel">Cancel</button>
-            <button class="btn primary" id="fc-band-save">Save</button>
-          </div>
-        </div>
-      </div>
-    </section>
-
     <section class="page" id="page-notify">
       <h1>Notifications</h1>
       <p class="lead">Switch a service on with its switch; click its name for its settings. Enabled services receive the same event messages, including this PC's name.</p>
@@ -1147,7 +999,6 @@
   <script src="night.js"></script>
   <script src="handbrake.js"></script>
   <script src="quietlift.js"></script>
-  <script src="feedback.js"></script>
   <script src="encrange.js"></script>
 </body>
 </html>
