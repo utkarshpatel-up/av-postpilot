@@ -358,6 +358,7 @@ Tests: `FEEDBACK_CUTTER_PYTHON=<python> npm test` (the built-in engine is tested
 - Track on/off is only reported for the current timeline, and switching it on the Deliver page doesn't stick.
 - Resolve's unsaved *Untitled Project* refuses project settings and asks for a name when saved.
 - Premiere's ExtendScript reads chained `a ? b : c ? d : e` left to right; the Premiere helper avoids it.
+- Need minimum Davinci Resolve version 21.1 for Normalize Audio to work in chain. Also need to have a project open in Resolve for audio to go to bin.
 
 ## Also in this repo
 `resolve-db-backup/`: backup and restore scripts for the Mac PostgreSQL project server (launchd, project-count alarm, restore into a separate `restore_…` library). See `resolve-db-backup/HOW_TO_RESTORE.txt`.
