@@ -44,9 +44,11 @@ test('Edit-2978 lists its day\'s Cam-XX (Audio) recordings in clip order, checki
   assert.strictEqual(path.basename(rows[0].lifted), '260603_0083-1-lifted.wav');
   assert.strictEqual(rows[1].cleaned, '');
 
-  // Send to Resolve: the lifted file goes on Edit-2978; another day's file doesn't
+  // Send to Resolve: the lifted file goes on Edit-2978; another day's file too, with the mismatch to warn about
   assert.deepStrictEqual(timelineFor(path.join(root, cam, '260603_0084-2-lifted.wav'), timelines), { name: 'Edit-2978', clip: 84 });
-  assert.match(timelineFor(path.join(root, cam, '260602_0099-1-lifted.wav'), timelines).why, /260602 isn't 2978 Dt-03 Jun 2026/);
+  assert.deepStrictEqual(timelineFor(path.join(root, cam, '260602_0099-1-lifted.wav'), timelines), {
+    name: 'Edit-2978', clip: 99, mismatch: 'the date in its name (260602) and the folder\'s date (2978 Dt-03 Jun 2026) don\'t match',
+  });
   assert.match(timelineFor(path.join(root, 'elsewhere', '260603_0083-1-lifted.wav'), timelines).why, /not in the day folder/);
 });
 

@@ -35,7 +35,7 @@ async function sendToResolve({ file, name, chainImport, opts, editTimelines }) {
   let edit = {}, note = null;
   if (opts.timeline !== 'current' && editTimelines) {
     edit = timelineFor(file, await editTimelines().catch(() => []));
-    if (edit.wrongDate) note = `Not put on an Edit timeline: ${edit.why}.`;
+    if (edit.mismatch) note = `Put on ${edit.name} anyway, but ${edit.mismatch}.`;
   }
   const r = await chainImport({
     file, bin: opts.bin || DEFAULTS.bin, timeline: opts.timeline, name: clip, channel, edit: edit.name || null, clipNo: edit.clip ?? null,

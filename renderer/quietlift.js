@@ -683,7 +683,7 @@ async function toResolve(file, btn) {
   const where = `timeline "${r.timeline}"${r.track ? `, track A${r.track}` : ''}`;
   log(`In Resolve: ${base(r.file)} in bin "${r.bin}", ${where}.${done}`);
   toast('In Resolve', `${base(r.file)} is in bin "${r.bin}" and on ${where}.${done}`, 'ok');
-  if (r.warning) toast('Not all done in Resolve', r.warning, 'warn');
+  if (r.warning) toast('Check in Resolve', r.warning, 'warn');
 }
 
 // "-6.3" -> -6.3, blank -> null (off); outside lo..hi -> undefined (not taken)

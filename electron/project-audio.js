@@ -114,6 +114,7 @@ function projectAudio(timelines) {
 }
 
 // Send to Resolve: which Edit timeline a lifted file goes on (the day folder it's in), or { why } when none.
+// A date in its name that isn't the folder's still goes there, with mismatch to warn about.
 function timelineFor(file, timelines) {
   const lower = file.toLowerCase();
   const cands = timelines.filter((t) => {
@@ -124,8 +125,9 @@ function timelineFor(file, timelines) {
   const t = cands.length > 1 ? owner(path.dirname(file), cands) : cands[0];
   const day = path.basename(dayFolder(t.name, t.files));
   const rec = recorderName(path.basename(file).replace(/\.wav$/i, '').replace(DERIVED, ''));
-  if (rec.date && dayDate(day) && rec.date !== dayDate(day)) return { why: `its date ${rec.date} isn't ${day}`, wrongDate: true };
-  return { name: t.name, clip: rec.clip };
+  const mismatch = rec.date && dayDate(day) && rec.date !== dayDate(day)
+    ? `the date in its name (${rec.date}) and the folder's date (${day}) don't match` : null;
+  return { name: t.name, clip: rec.clip, ...(mismatch && { mismatch }) };
 }
 
 module.exports = { dayDate, recorderName, dayFolder, audioDirs, projectAudio, timelineFor };

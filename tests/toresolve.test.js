@@ -55,7 +55,7 @@ test('both channels of a clip go to one timeline: the name without -1 / -2, and 
   assert.deepStrictEqual([one.timeline, one.track, two.timeline, two.track], ['260910_0083', 1, '260910_0083', 2]);
 });
 
-test('a file of a day folder goes on that day\'s Edit timeline, unless its date is another day', async () => {
+test('a file of a day folder goes on that day\'s Edit timeline, with a warning when its date is another day', async () => {
   const day = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tr-')), '2978 Dt-03 Jun 2026');
   const cam = path.join(day, 'Clips for Insert', 'Cam-04 (Audio)');
   const timelines = [{ name: 'Edit-2978', files: [path.join(day, 'Topic E Dt-03-Jun-26', 'Clip-01.mov')] }];
@@ -66,8 +66,8 @@ test('a file of a day folder goes on that day\'s Edit timeline, unless its date 
   assert.deepStrictEqual([r.timeline, r.track, r.warning], ['Edit-2978', 5, null]);
 
   const wrong = await sendToResolve({ file: path.join(cam, '260602_0099-1-lifted.wav'), name: '260602_0099-1', chainImport: f.chainImport, opts: DEFAULTS, editTimelines });
-  assert.strictEqual(f.calls[1].edit, null);
-  assert.match(wrong.warning, /Not put on an Edit timeline: its date 260602 isn't 2978 Dt-03 Jun 2026/);
+  assert.deepStrictEqual([f.calls[1].edit, f.calls[1].clipNo], ['Edit-2978', 99]);
+  assert.match(wrong.warning, /Put on Edit-2978 anyway, but the date in its name \(260602\) and the folder's date \(2978 Dt-03 Jun 2026\) don't match/);
 
   await sendToResolve({ file: path.join(cam, '260603_0083-1-lifted.wav'), name: '260603_0083-1', chainImport: f.chainImport, opts: DEFAULTS, editTimelines: async () => { throw new Error('Resolve not running'); } });
   assert.strictEqual(f.calls[2].edit, null);   // can't ask Resolve: a timeline per clip, as before
