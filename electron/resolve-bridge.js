@@ -129,6 +129,7 @@ class ResolveBridge {
   detectSceneCuts(name) { return this.request(`detect\t${toLua({ name })}`, 6 * 60 * 60 * 1000); }
   renameSeries(args) { return this.request(`rename\t${toLua(args)}`, 10 * 60 * 1000); }
   save() { return this.request('save', 60000); }
+  chainImport(args) { return this.request(`chainimport	${toLua(args)}`, 5 * 60 * 1000); }
   exportProject(file) { return this.request(`export\t${file}`, 10 * 60 * 1000); }
 }
 

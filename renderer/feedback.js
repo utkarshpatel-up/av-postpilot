@@ -1,4 +1,4 @@
-/* global pilot, $, esc, showToast, save, settings */
+/* global pilot, $, esc, showToast, save, settings, go */
 // Feedback Cutter page: finds feedback rings in a speech recording and notches them out.
 // Ported from the Feedback Cutter app's frontend; the engine runs in Python (electron/feedbackcutter).
 // Wrapped in a function so its names (render, fmt, zoom…) don't clash with the other page scripts.
@@ -446,7 +446,14 @@ async function exportFile(kind) {
   }
   const r = await pilot.feedback('export', { job: RESULT.job, name: RESULT.files[kind], source: RESULT.path, suffix: EXPORTS[kind] });
   if (!r.ok) return toast('Save failed', r.error, 'err');
-  if (r.path) toast('Saved', r.path, 'ok', { label: 'Show in folder', run: () => pilot.feedback('reveal', { path: r.path }) });
+  if (!r.path) return;
+  if (kind === 'cleaned') {
+    // next step of the chain: the cleaned WAV becomes Quiet Lift's debleed track
+    go('quietlift');
+    window.qlTakeFile(r.path);
+    return toast('Saved, now in Quiet Lift', `${r.path.split(/[\\/]/).pop()} is loaded as the debleed track. Analyze, check, then Render.`, 'ok');
+  }
+  toast('Saved', r.path, 'ok', { label: 'Show in folder', run: () => pilot.feedback('reveal', { path: r.path }) });
 }
 
 // ---------- A/B transport (small MP3 previews, so long files play straight away) ----------

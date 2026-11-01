@@ -637,6 +637,58 @@ local function encstart(a)
   return { ok = true, id = id, fps = fps, resolution = w and (w .. 'x' .. h) or nil }
 end
 
+-- After a Quiet Lift render (toresolve.js): the lifted WAV into a bin, onto a timeline, then the Fairlight page.
+-- a = { file, bin, timeline = 'current' | 'new', name, normalize = dBFS sample peak or nil, isolation = Voice Isolation 0-100 or nil }
+local function chainimport(a)
+  local r = connect()
+  local _, p = project()
+  if not p then return { ok = false, error = 'No project open in Resolve' } end
+  -- On the Project Manager there is no page, the project is a placeholder and bins can't be made
+  local page = r:GetCurrentPage()
+  if not page or page == '' then return { ok = false, error = 'Resolve is on the Project Manager, open a project and Render again' } end
+  local mp = p:GetMediaPool()
+  local folder = folderPath(mp, { a.bin })
+  mp:SetCurrentFolder(folder)
+  local got = mp:ImportMedia({ a.file })
+  local clip = got and got[1]
+  if not clip then return { ok = false, error = 'Resolve could not import ' .. a.file } end
+  local tl = a.timeline == 'current' and p:GetCurrentTimeline() or nil
+  if not tl then
+    local name, taken, n = a.name, timelinesByName(p), 2
+    while taken[name] do name = a.name .. ' ' .. n; n = n + 1 end
+    tl = mp:CreateEmptyTimeline(name)
+    if not tl then return { ok = false, error = 'could not create timeline ' .. name } end
+  end
+  p:SetCurrentTimeline(tl)
+  local placed = mp:AppendToTimeline({ clip })
+  if not placed or #placed == 0 then return { ok = false, error = 'could not place the file on timeline ' .. tl:GetName() } end
+  -- Then Normalize Audio Level on the clip and Voice Isolation on its track (track FX, as in the Mixer).
+  -- Either one missing is a warning: the clip is in by now.
+  local item, track, normalized
+  for _, it in ipairs(placed) do
+    local ti = it:GetTrackTypeAndIndex()
+    if ti and ti[1] == 'audio' then item, track = it, ti[2]; break end
+  end
+  local warnings = {}
+  local function try(f) local called, done = pcall(f); return called and done end
+  if a.normalize then
+    if item and try(function()
+      return tl:NormalizeAudioLevel({ item }, { normalizationMode = 'Sample Peak Program', targetLevel = a.normalize,
+        setLevelMode = r.NORMALIZE_AUDIO_SET_LEVEL_RELATIVE })
+    end) then normalized = a.normalize
+    else warnings[#warnings + 1] = 'could not normalize (needs Resolve 21.1 or later, this is ' .. r:GetVersionString() .. ')' end
+  end
+  local isolationTrack
+  if a.isolation then
+    if track and try(function() return tl:SetVoiceIsolationState(track, { isEnabled = true, amount = a.isolation }) end) then
+      isolationTrack = track
+    else warnings[#warnings + 1] = 'could not turn on Voice Isolation (needs Resolve 20 or later)' end
+  end
+  r:OpenPage('fairlight')
+  return { ok = true, timeline = tl:GetName(), bin = a.bin, clip = clip:GetName(), normalized = normalized,
+    isolationTrack = isolationTrack, warning = #warnings > 0 and table.concat(warnings, '; ') or nil }
+end
+
 local function jobstatus(a)
   if a.token then
     local owned, err = encowned(a)
@@ -685,7 +737,7 @@ while true do
   local cmd, arg = line:match('^%s*(%w+)\t?(.*)$')
   if cmd then
     local ok, res = pcall(function()
-      if encoderSession and (cmd == 'setup' or cmd == 'series' or cmd == 'rename' or cmd == 'detect' or cmd == 'hdbatch' or cmd == 'hdcleanup' or cmd == 'save' or cmd == 'export' or cmd == 'startrender') then
+      if encoderSession and (cmd == 'setup' or cmd == 'series' or cmd == 'rename' or cmd == 'detect' or cmd == 'hdbatch' or cmd == 'hdcleanup' or cmd == 'chainimport' or cmd == 'save' or cmd == 'export' or cmd == 'startrender') then
         return { ok = false, error = 'Finish Encoder before modifying or backing up a project' }
       end
       if cmd == 'status' then return status()
@@ -715,6 +767,7 @@ while true do
       elseif cmd == 'jobstatus' then return jobstatus(parse(arg))
       elseif cmd == 'stoprender' then return stoprender()
       elseif cmd == 'startrender' then return startrender(parse(arg))
+      elseif cmd == 'chainimport' then return chainimport(parse(arg))
       else return { ok = false, error = 'unknown command: ' .. cmd } end
     end)
     if not ok then res = { ok = false, error = tostring(res) } end
