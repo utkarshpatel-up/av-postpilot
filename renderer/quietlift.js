@@ -716,7 +716,7 @@ function offerNext() {
   if (!listFile || listFile.toLowerCase() !== (S.files.input || '').toLowerCase()) return;
   const next = pf.next(listFile);
   pf.refresh();
-  if (next) toast('Next in the project', next.name, 'ok', { label: `Open ${next.name}`, run: () => openListed(next) });
+  if (next) toast('Next in the project', next.name, 'ok', { label: `Open ${next.name}`, run: () => pf.open(next) });
 }
 
 // Feedback Cutter's "Cleaned WAV…" hands its file over: a new debleed track, nothing kept from the last one.

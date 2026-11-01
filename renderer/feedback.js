@@ -454,7 +454,7 @@ async function exportFile(kind) {
     const saved = r.path.split(/[\\/]/).pop();
     pf.refresh();
     if (!next) return toast('Saved, last one in the project', `${saved}. Quiet Lift's Project files lists the cleaned recordings.`, 'ok');
-    return toast('Saved', `${saved}. Next: ${next.name}`, 'ok', { label: `Open ${next.name}`, run: () => openListed(next.file) });
+    return toast('Saved', `${saved}. Next: ${next.name}`, 'ok', { label: `Open ${next.name}`, run: () => pf.open(next) });
   }
   if (kind === 'cleaned') {
     // next step of the chain: the cleaned WAV becomes Quiet Lift's debleed track
