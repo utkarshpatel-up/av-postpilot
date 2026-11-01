@@ -14,3 +14,6 @@
 .pf-chip.ok { color: var(--ok); border-color: var(--ok); }
 .pf-chip.warn { color: var(--warn); border-color: var(--warn); }
 .pf-msg { color: var(--muted); font-size: 12.5px; padding: 10px; }
+/* Quiet Lift resets its buttons and cards (quietlift.css): the list keeps its own spacing there */
+#page-quietlift .pf.card { padding: 6px; margin: 0 0 14px; }
+#page-quietlift .pf button.pf-row { padding: 7px 10px; font-size: 12.5px; }
