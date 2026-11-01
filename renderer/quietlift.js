@@ -661,6 +661,7 @@ async function render() {
     for (const msg of Object.values(r.marker_errors)) toast('Markers not added', msg, 'warn');
     renderMarkerStatus();
     if (resolvePrefs().enabled) await toResolve(r.output, btn);
+    offerNext();
   } catch (e) {
     toast('Render failed', e.message, 'err');
   } finally {
@@ -700,6 +701,22 @@ function renderResolveSwitch() {
   $('ql-res-timeline').value = resolvePrefs().timeline;
   $('ql-res-normalize').value = resolvePrefs().normalize ?? '';
   $('ql-res-isolation').value = resolvePrefs().isolation ?? '';
+}
+
+// Project files: the open Resolve project's recordings, here their cleaned versions (renderer/projectfiles.js)
+let listFile = '';
+function openListed(row) {
+  const file = pf.fileOf(row);
+  if (!row.cleaned) toast('Not cleaned yet', `${row.name} has no Feedback Cutter save, so the recording itself is loaded.`, 'warn');
+  listFile = file;
+  window.qlTakeFile(file);
+}
+// after a Project files recording is rendered: the next one
+function offerNext() {
+  if (!listFile || listFile.toLowerCase() !== (S.files.input || '').toLowerCase()) return;
+  const next = pf.next(listFile);
+  pf.refresh();
+  if (next) toast('Next in the project', next.name, 'ok', { label: `Open ${next.name}`, run: () => openListed(next) });
 }
 
 // Feedback Cutter's "Cleaned WAV…" hands its file over: a new debleed track, nothing kept from the last one.
@@ -802,6 +819,9 @@ renderResults();
 updateButtons();
 
 // Called when the page is shown: the Python engine starts the first time.
+const pf = window.projectFiles($('ql-pf'), { kind: 'ql', pick: (row) => openListed(row) });
+$('ql-btn-project').onclick = () => pf.toggle();
+
 window.qlOpen = () => {
   renderEditor();
   renderMarkSwitch();

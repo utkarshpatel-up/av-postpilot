@@ -650,11 +650,53 @@ local function channelTrack(tl, want)
   return add() and n or nil
 end
 
+-- Recorder audio on a day's Edit timeline goes on its own tracks, "Rec 1" / "Rec 2" by channel, back to back
+-- from the start in clip-number order (after the clips with lower numbers). Where that space is taken (a
+-- re-render, or a later clip already there) the next track of the channel instead, "Rec 1 (2)".
+local function recNumber(name)
+  name = name or ''
+  return tonumber(name:match('^%d%d%d%d%d%d_0*(%d+)') or name:match('[Cc]lip[%s_%-]*0*(%d+)'))
+end
+
+local function tcFrames(tc, fps)
+  local h, m, s, f = (tc or ''):match('(%d+):(%d+):(%d+)[:;](%d+)')
+  if not h then return nil end
+  return ((tonumber(h) * 60 + tonumber(m)) * 60 + tonumber(s)) * math.floor(fps + 0.5) + tonumber(f)
+end
+
+local function recSlot(tl, clip, channel, clipNo)
+  local base = channel and ('Rec ' .. channel) or 'Rec'
+  local tracks = {}
+  for i = 1, tl:GetTrackCount('audio') do
+    local n = tl:GetTrackName('audio', i) or ''
+    if n == base or n:sub(1, #base + 2) == base .. ' (' then tracks[#tracks + 1] = i end
+  end
+  local start = tl:GetStartFrame()
+  for _, it in ipairs(tracks[1] and tl:GetItemListInTrack('audio', tracks[1]) or {}) do
+    local n = recNumber(it:GetName())
+    if (not clipNo or (n and n < clipNo)) and it:GetEnd() > start then start = it:GetEnd() end
+  end
+  local len = tcFrames(clip:GetClipProperty('Duration'), tonumber(tl:GetSetting('timelineFrameRate')) or 24) or 1
+  local function free(i)
+    for _, it in ipairs(tl:GetItemListInTrack('audio', i) or {}) do
+      if it:GetStart() < start + len and it:GetEnd() > start then return false end
+    end
+    return true
+  end
+  for _, i in ipairs(tracks) do if free(i) then return i, start end end
+  local kind = tl:GetTrackCount('audio') > 0 and tl:GetTrackSubType('audio', 1) or 'mono'
+  if not tl:AddTrack('audio', kind) then return nil end
+  local i = tl:GetTrackCount('audio')
+  tl:SetTrackName('audio', i, #tracks == 0 and base or (base .. ' (' .. (#tracks + 1) .. ')'))
+  return i, start
+end
+
 -- After a Quiet Lift render (toresolve.js): the lifted WAV into a bin, onto a timeline, then the Fairlight page.
+-- With edit (a file of a day folder, project-audio.js) it goes on that Edit timeline (recSlot). Otherwise
 -- 'new' is a timeline per clip (name = the clip, 260910_0083), each channel on its own track from the
 -- start, so -1 and -2 line up; 'current' appends to the end of the current timeline.
--- a = { file, bin, timeline = 'current' | 'new', name, channel = 1, 2 ... or nil,
---       normalize = dBFS sample peak or nil, isolation = Voice Isolation 0-100 or nil }
+-- a = { file, bin, timeline = 'current' | 'new', name, channel = 1, 2 ... or nil, edit = 'Edit-2978' or nil,
+--       clipNo = 83 or nil, normalize = dBFS sample peak or nil, isolation = Voice Isolation 0-100 or nil }
 local function chainimport(a)
   local r = connect()
   local _, p = project()
@@ -668,7 +710,13 @@ local function chainimport(a)
   local got = mp:ImportMedia({ a.file })
   local clip = got and got[1]
   if not clip then return { ok = false, error = 'Resolve could not import ' .. a.file } end
-  local tl = a.timeline == 'current' and p:GetCurrentTimeline() or nil
+  local tl
+  if a.edit then
+    tl = timelinesByName(p)[a.edit]
+    if not tl then return { ok = false, error = a.edit .. ' is not in the open project' } end
+  elseif a.timeline == 'current' then
+    tl = p:GetCurrentTimeline()
+  end
   local perClip = not tl
   if perClip then
     tl = timelinesByName(p)[a.name] or mp:CreateEmptyTimeline(a.name)
@@ -676,7 +724,11 @@ local function chainimport(a)
   end
   p:SetCurrentTimeline(tl)
   local placed
-  if perClip then
+  if a.edit then
+    local want, at = recSlot(tl, clip, a.channel, a.clipNo)
+    if not want then return { ok = false, error = 'could not add an audio track to timeline ' .. tl:GetName() } end
+    placed = mp:AppendToTimeline({ { mediaPoolItem = clip, startFrame = 0, mediaType = 2, trackIndex = want, recordFrame = at } })
+  elseif perClip then
     local want = channelTrack(tl, a.channel or 1)
     if not want then return { ok = false, error = 'could not add an audio track to timeline ' .. tl:GetName() } end
     -- no endFrame: a WAV's 'Frames' is blank, and without one Resolve places the whole file
@@ -711,6 +763,30 @@ local function chainimport(a)
   r:OpenPage('fairlight')
   return { ok = true, timeline = tl:GetName(), bin = a.bin, clip = clip:GetName(), track = track, normalized = normalized,
     isolationTrack = isolationTrack, warning = #warnings > 0 and table.concat(warnings, '; ') or nil }
+end
+
+-- The open project's Edit timelines (Edit-2978, Edit-2978 E1 ...) with the files their video clips come
+-- from: project-audio.js finds each one's day folder from these, and the recorder audio in it.
+local function edittimelines()
+  local _, p = project()
+  if not p then return { ok = false, error = 'No project open in Resolve' } end
+  local list = array()
+  for i = 1, p:GetTimelineCount() do
+    local tl = p:GetTimelineByIndex(i)
+    local name = tl and tl:GetName() or ''
+    if name:match('^Edit%-') then
+      local seen, files = {}, array()
+      for t = 1, tl:GetTrackCount('video') do
+        for _, it in ipairs(tl:GetItemListInTrack('video', t) or {}) do
+          local m = it:GetMediaPoolItem()
+          local f = m and m:GetClipProperty('File Path')
+          if f and f ~= '' and not seen[f] then seen[f] = true; files[#files + 1] = f end
+        end
+      end
+      list[#list + 1] = { name = name, files = files }
+    end
+  end
+  return { ok = true, project = p:GetName(), timelines = list }
 end
 
 local function jobstatus(a)
@@ -792,6 +868,7 @@ while true do
       elseif cmd == 'stoprender' then return stoprender()
       elseif cmd == 'startrender' then return startrender(parse(arg))
       elseif cmd == 'chainimport' then return chainimport(parse(arg))
+      elseif cmd == 'edittimelines' then return edittimelines()
       else return { ok = false, error = 'unknown command: ' .. cmd } end
     end)
     if not ok then res = { ok = false, error = tostring(res) } end

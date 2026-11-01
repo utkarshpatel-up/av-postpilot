@@ -21,6 +21,7 @@ const HANDBRAKE_VERSION = require('../package.json').handbrakeCli.version;
 const { QuietLift, DEFAULTS: QUIET_LIFT_DEFAULTS, installScripts: installQuietLift } = require('./quietlift');
 const feedbackCutter = require('./feedbackcutter');
 const toResolve = require('./toresolve');
+const projectAudio = require('./project-audio');
 const { Stabilization } = require('./stabilization');
 const { createFrameGrabber } = require('./stabilization-frames');
 const { PremiereImport } = require('./premiere-import');
@@ -980,14 +981,33 @@ ipcMain.handle('enc-preview', async (_e, { action, file }) => {
     return { ok: false, error: 'Unknown preview action' };
   } catch (err) { return { ok: false, error: err.message }; }
 });
+// The open project's Edit timelines with the files their clips come from (project-audio.js)
+async function editTimelines() {
+  const r = await bridge.editTimelines();
+  if (!r.ok) throw new Error(r.error);
+  return r.timelines;
+}
+
+// Project files list on the Feedback Cutter and Quiet Lift pages: the recorder audio of every Edit timeline
+ipcMain.handle('project-audio', async () => {
+  try {
+    return { ok: true, project: status.project?.name || '', ...projectAudio.projectAudio(await editTimelines()) };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 ipcMain.handle('quietlift', async (_e, { action, args = {} }) => {
   try {
     if (action === 'call') return { ok: true, data: await quietLift.call(args.cmd, args.payload) };
     if (action === 'restart') { quietLift.stop(); return { ok: true }; }
     // after Render: into Resolve (bin, timeline, Fairlight page)
     if (action === 'to-resolve') {
-      const r = await toResolve.sendToResolve({ file: args.path, name: args.name, chainImport: (a) => bridge.chainImport(a), opts: settings.toResolve });
-      log('info', `Quiet Lift: ${path.basename(r.file)} is on timeline "${r.timeline}" in bin "${r.bin}"`);
+      const r = await toResolve.sendToResolve({
+        file: args.path, name: args.name, opts: settings.toResolve,
+        chainImport: (a) => bridge.chainImport(a), editTimelines,
+      });
+      log('info', `Quiet Lift: ${path.basename(r.file)} is on timeline "${r.timeline}"${r.track ? ` (A${r.track})` : ''} in bin "${r.bin}"`);
       return { ok: true, ...r };
     }
     if (action === 'reveal') { shell.showItemInFolder(args.path); return { ok: true }; }

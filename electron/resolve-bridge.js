@@ -130,6 +130,7 @@ class ResolveBridge {
   renameSeries(args) { return this.request(`rename\t${toLua(args)}`, 10 * 60 * 1000); }
   save() { return this.request('save', 60000); }
   chainImport(args) { return this.request(`chainimport	${toLua(args)}`, 5 * 60 * 1000); }
+  editTimelines() { return this.request('edittimelines', 60000); }
   exportProject(file) { return this.request(`export\t${file}`, 10 * 60 * 1000); }
 }
 

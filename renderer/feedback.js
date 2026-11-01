@@ -9,6 +9,7 @@ let RESULT = null;          // last analysis: events, spectrogram geometry, file
 let URLS = {};              // job file name -> file:// URL
 let busy = false, started = false;
 let unsaved = false;        // cleaned audio not saved yet (main asks before it is thrown away)
+let listFile = '';          // opened from Project files: saving stays here for the next recording
 const audio = $('fc-audio');
 const page = $('page-feedback');
 const toast = showToast;
@@ -447,6 +448,14 @@ async function exportFile(kind) {
   const r = await pilot.feedback('export', { job: RESULT.job, name: RESULT.files[kind], source: RESULT.path, suffix: EXPORTS[kind] });
   if (!r.ok) return toast('Save failed', r.error, 'err');
   if (!r.path) return;
+  if (kind === 'cleaned' && listFile && listFile.toLowerCase() === RESULT.path.toLowerCase()) {
+    // a Project files recording: all of them get cleaned first, Quiet Lift's list picks them up later
+    const next = pf.next(RESULT.path);
+    const saved = r.path.split(/[\\/]/).pop();
+    pf.refresh();
+    if (!next) return toast('Saved, last one in the project', `${saved}. Quiet Lift's Project files lists the cleaned recordings.`, 'ok');
+    return toast('Saved', `${saved}. Next: ${next.name}`, 'ok', { label: `Open ${next.name}`, run: () => openListed(next.file) });
+  }
   if (kind === 'cleaned') {
     // next step of the chain: the cleaned WAV becomes Quiet Lift's debleed track
     go('quietlift');
@@ -679,6 +688,14 @@ function bind() {
 
 bind();
 updateBandChipTitles();
+
+// Project files: the recorder audio of the open Resolve project's Edit timelines (renderer/projectfiles.js)
+function openListed(file) {
+  listFile = file;
+  analyze(file);
+}
+const pf = window.projectFiles($('fc-pf'), { kind: 'fc', pick: (_row, file) => openListed(file) });
+$('fc-btn-project').onclick = () => pf.toggle();
 
 // Called when the page is shown: the Python engine starts the first time. With a path, analyzes that file.
 window.fcOpen = (file) => {
