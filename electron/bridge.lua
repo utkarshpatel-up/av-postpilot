@@ -637,8 +637,24 @@ local function encstart(a)
   return { ok = true, id = id, fps = fps, resolution = w and (w .. 'x' .. h) or nil }
 end
 
+-- The audio track for a channel (A1 for -1, A2 for -2 ...), made if missing. When a clip is already
+-- there (a second render of that channel) the first empty track instead, so nothing gets covered.
+local function channelTrack(tl, want)
+  local function empty(i) local l = tl:GetItemListInTrack('audio', i); return not l or #l == 0 end
+  local n = tl:GetTrackCount('audio')
+  local kind = n > 0 and tl:GetTrackSubType('audio', 1) or 'mono'
+  local function add() if tl:AddTrack('audio', kind) then n = n + 1; return true end end
+  while n < want do if not add() then return nil end end
+  if empty(want) then return want end
+  for i = 1, n do if empty(i) then return i end end
+  return add() and n or nil
+end
+
 -- After a Quiet Lift render (toresolve.js): the lifted WAV into a bin, onto a timeline, then the Fairlight page.
--- a = { file, bin, timeline = 'current' | 'new', name, normalize = dBFS sample peak or nil, isolation = Voice Isolation 0-100 or nil }
+-- 'new' is a timeline per clip (name = the clip, 260910_0083), each channel on its own track from the
+-- start, so -1 and -2 line up; 'current' appends to the end of the current timeline.
+-- a = { file, bin, timeline = 'current' | 'new', name, channel = 1, 2 ... or nil,
+--       normalize = dBFS sample peak or nil, isolation = Voice Isolation 0-100 or nil }
 local function chainimport(a)
   local r = connect()
   local _, p = project()
@@ -653,14 +669,22 @@ local function chainimport(a)
   local clip = got and got[1]
   if not clip then return { ok = false, error = 'Resolve could not import ' .. a.file } end
   local tl = a.timeline == 'current' and p:GetCurrentTimeline() or nil
-  if not tl then
-    local name, taken, n = a.name, timelinesByName(p), 2
-    while taken[name] do name = a.name .. ' ' .. n; n = n + 1 end
-    tl = mp:CreateEmptyTimeline(name)
-    if not tl then return { ok = false, error = 'could not create timeline ' .. name } end
+  local perClip = not tl
+  if perClip then
+    tl = timelinesByName(p)[a.name] or mp:CreateEmptyTimeline(a.name)
+    if not tl then return { ok = false, error = 'could not create timeline ' .. a.name } end
   end
   p:SetCurrentTimeline(tl)
-  local placed = mp:AppendToTimeline({ clip })
+  local placed
+  if perClip then
+    local want = channelTrack(tl, a.channel or 1)
+    if not want then return { ok = false, error = 'could not add an audio track to timeline ' .. tl:GetName() } end
+    -- no endFrame: a WAV's 'Frames' is blank, and without one Resolve places the whole file
+    placed = mp:AppendToTimeline({ { mediaPoolItem = clip, startFrame = 0, mediaType = 2, trackIndex = want,
+      recordFrame = tl:GetStartFrame() } })
+  else
+    placed = mp:AppendToTimeline({ clip })
+  end
   if not placed or #placed == 0 then return { ok = false, error = 'could not place the file on timeline ' .. tl:GetName() } end
   -- Then Normalize Audio Level on the clip and Voice Isolation on its track (track FX, as in the Mixer).
   -- Either one missing is a warning: the clip is in by now.
@@ -685,7 +709,7 @@ local function chainimport(a)
     else warnings[#warnings + 1] = 'could not turn on Voice Isolation (needs Resolve 20 or later)' end
   end
   r:OpenPage('fairlight')
-  return { ok = true, timeline = tl:GetName(), bin = a.bin, clip = clip:GetName(), normalized = normalized,
+  return { ok = true, timeline = tl:GetName(), bin = a.bin, clip = clip:GetName(), track = track, normalized = normalized,
     isolationTrack = isolationTrack, warning = #warnings > 0 and table.concat(warnings, '; ') or nil }
 end
 

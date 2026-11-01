@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { DEFAULTS, sendToResolve, normalizeLevel, isolationAmount } = require('../electron/toresolve');
+const { DEFAULTS, sendToResolve, splitChannel, normalizeLevel, isolationAmount } = require('../electron/toresolve');
 
 function fake(reply) {
   const calls = [];
@@ -11,14 +11,14 @@ test('the lifted file goes to Resolve with the bin and timeline settings', async
   const f = fake((a) => ({ ok: true, timeline: a.name, bin: a.bin, clip: 'Talk-02-lifted.wav' }));
   const file = 'D:\\Talks\\Talk-02-lifted.wav';
   const r = await sendToResolve({ file, name: 'Talk-02', chainImport: f.chainImport, opts: DEFAULTS });
-  assert.deepStrictEqual(f.calls, [{ file, bin: 'Audio Chain', timeline: 'new', name: 'Talk-02', normalize: -6.3, isolation: 20 }]);
-  assert.deepStrictEqual(r, { file, timeline: 'Talk-02', bin: 'Audio Chain', normalized: null, isolationTrack: null, warning: null });
+  assert.deepStrictEqual(f.calls, [{ file, bin: 'Audio Chain', timeline: 'new', name: 'Talk-02', channel: null, normalize: -6.3, isolation: 20 }]);
+  assert.deepStrictEqual(r, { file, timeline: 'Talk-02', bin: 'Audio Chain', track: null, normalized: null, isolationTrack: null, warning: null });
 });
 
 test('a blank bin uses the default, and no recording name uses the file\'s own', async () => {
   const f = fake(() => ({ ok: true, timeline: 't', bin: 'b' }));
   await sendToResolve({ file: '/x/a-lifted.wav', chainImport: f.chainImport, opts: { ...DEFAULTS, bin: '', timeline: 'current' } });
-  assert.deepStrictEqual(f.calls[0], { file: '/x/a-lifted.wav', bin: 'Audio Chain', timeline: 'current', name: 'a-lifted', normalize: -6.3, isolation: 20 });
+  assert.deepStrictEqual(f.calls[0], { file: '/x/a-lifted.wav', bin: 'Audio Chain', timeline: 'current', name: 'a-lifted', channel: null, normalize: -6.3, isolation: 20 });
 });
 
 test('Voice Isolation: off when blank, a whole number kept to 0-100; the track and a warning come back', async () => {
@@ -36,6 +36,20 @@ test('Normalize: off when blank, kept to -60..0 dBFS; what Resolve normalized to
   const r = await sendToResolve({ file: '/x/a.wav', chainImport: f.chainImport, opts: { ...DEFAULTS, normalize: '' } });
   assert.strictEqual(f.calls[0].normalize, null);
   assert.strictEqual(r.normalized, -6.3);
+});
+
+test('both channels of a clip go to one timeline: the name without -1 / -2, and the channel', async () => {
+  assert.deepStrictEqual(splitChannel('260910_0083-1'), { clip: '260910_0083', channel: 1 });
+  assert.deepStrictEqual(splitChannel('260910_0083-2'), { clip: '260910_0083', channel: 2 });
+  assert.deepStrictEqual(splitChannel('260910_0084-1-debleed'), { clip: '260910_0084', channel: 1 });
+  assert.deepStrictEqual(splitChannel('260910_0083'), { clip: '260910_0083', channel: null });   // not channel 83
+  assert.deepStrictEqual(splitChannel('Talk-02'), { clip: 'Talk-02', channel: null });           // a talk number, not a channel
+  const f = fake((a) => ({ ok: true, timeline: a.name, bin: a.bin, track: a.channel }));
+  const opts = DEFAULTS;
+  const one = await sendToResolve({ file: 'F:\Cam-04\260910_0083-1-lifted.wav', name: '260910_0083-1', chainImport: f.chainImport, opts });
+  const two = await sendToResolve({ file: 'F:\Cam-04\260910_0083-2-lifted.wav', name: '260910_0083-2', chainImport: f.chainImport, opts });
+  assert.deepStrictEqual(f.calls.map((c) => [c.name, c.channel]), [['260910_0083', 1], ['260910_0083', 2]]);
+  assert.deepStrictEqual([one.timeline, one.track, two.timeline, two.track], ['260910_0083', 1, '260910_0083', 2]);
 });
 
 test('when Resolve refuses, the error names the file and the reason', async () => {
