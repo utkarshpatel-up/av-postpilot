@@ -15,6 +15,7 @@ from source; the app's resources/ folder when installed, where the build copies 
 """
 import glob
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -172,8 +173,14 @@ def cmd_render(req, log):
         raise ValueError(f"Not enough space for {os.path.basename(out)}: it needs about {need // 2**20} MB "
                          f"and {os.path.splitdrive(out)[0] or os.path.dirname(out)} has {free // 2**20} MB free.")
     log(f"Rendering {len(a.stretches) - len(skipped)} stretch(es), skipping {len(skipped)}...")
+    gain = ql.gain_curve(a, skipped)
+    target = req.get("normalize")  # dBFS sample peak, or None to leave the level as lifted
+    scale = 1.0
+    if target is not None:
+        scale = ql.normalize_scale(a, gain, float(target))
+        log(f"Normalizing: highest sample peak to {float(target):g} dBFS ({20 * math.log10(scale):+.1f} dB)")
     try:
-        ql.render(a, out, ql.gain_curve(a, skipped))
+        ql.render(a, out, gain, scale=scale)
     except Exception:
         try:
             os.remove(out)   # half a file would pass for a finished render

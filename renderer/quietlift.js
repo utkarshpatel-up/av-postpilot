@@ -651,11 +651,14 @@ async function render() {
   btn.classList.add('loading');
   btn.querySelector('span').textContent = 'Rendering…';
   try {
-    const r = await engine('render', { output: S.output, skipped: [...S.skipped], mark_input: prefs().markInput });
+    // normalized only on its way to Resolve (Fairlight's Normalize Audio Level, Sample Peak Program)
+    const normalize = resolvePrefs().enabled ? resolvePrefs().normalize ?? null : null;
+    const r = await engine('render', { output: S.output, skipped: [...S.skipped], mark_input: prefs().markInput, normalize });
     S.rendered = { output: r.output, skips: skipKey(), markedInput: r.marked_input };
     if (r.marked_input) S.inputMarks = skipKey();
     if (r.marked_input) a.marked = r.markers;
-    toast('Render complete', `${base(r.output)}: ${a.stretches.length - S.skipped.size} stretch(es) lifted, the rest is bit-for-bit.` +
+    toast('Render complete', `${base(r.output)}: ${a.stretches.length - S.skipped.size} stretch(es) lifted, ` +
+      (normalize === null ? 'the rest is bit-for-bit.' : `then normalized to a ${normalize} dBFS peak.`) +
       ` ${r.markers} QL marker(s) added to ${r.marked_input ? 'both files' : 'the lifted file'}.`, 'ok',
       { label: 'Show in folder', run: () => pilot.quietLift('reveal', { path: r.output }) });
     for (const msg of Object.values(r.marker_errors)) toast('Markers not added', msg, 'warn');
@@ -677,8 +680,17 @@ async function toResolve(file, btn) {
   log('Sending to Resolve…');
   const r = await pilot.quietLift('to-resolve', { path: file, name: recordingName(S.files.input) });
   if (!r.ok) return toast('Not sent to Resolve', r.error, 'err');
-  log(`In Resolve: ${base(r.file)} in bin "${r.bin}", timeline "${r.timeline}".`);
-  toast('In Resolve', `${base(r.file)} is in bin "${r.bin}" and on timeline "${r.timeline}".`, 'ok');
+  const iso = r.isolationTrack ? ` Voice Isolation ${resolvePrefs().isolation} on audio track ${r.isolationTrack}.` : '';
+  log(`In Resolve: ${base(r.file)} in bin "${r.bin}", timeline "${r.timeline}".${iso}`);
+  toast('In Resolve', `${base(r.file)} is in bin "${r.bin}" and on timeline "${r.timeline}".${iso}`, 'ok');
+  if (r.warning) toast('Voice Isolation not set', r.warning, 'warn');
+}
+
+// "-6.3" -> -6.3, blank -> null (off); outside lo..hi -> undefined (not taken)
+function numberOrOff(v, lo, hi) {
+  if (v.trim() === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n >= lo && n <= hi ? n : undefined;
 }
 
 function renderResolveSwitch() {
@@ -687,6 +699,8 @@ function renderResolveSwitch() {
   $('ql-to-resolve').lastElementChild.textContent = on ? 'Send to Resolve' : 'Off';
   $('ql-res-bin').value = resolvePrefs().bin;
   $('ql-res-timeline').value = resolvePrefs().timeline;
+  $('ql-res-normalize').value = resolvePrefs().normalize ?? '';
+  $('ql-res-isolation').value = resolvePrefs().isolation ?? '';
 }
 
 // Feedback Cutter's "Cleaned WAV…" hands its file over: a new debleed track, nothing kept from the last one.
@@ -744,6 +758,14 @@ function bind() {
   };
   $('ql-res-bin').onchange = () => saveResolvePrefs({ bin: $('ql-res-bin').value.trim() || 'Audio Chain' });
   $('ql-res-timeline').onchange = () => saveResolvePrefs({ timeline: $('ql-res-timeline').value });
+  for (const [id, key, lo, hi, round] of [['ql-res-normalize', 'normalize', -60, 0, false], ['ql-res-isolation', 'isolation', 0, 100, true]]) {
+    $(id).onchange = () => {
+      const v = numberOrOff($(id).value, lo, hi);
+      if (v === undefined) toast('Not saved', `Use a number from ${lo} to ${hi}, or leave it blank for off.`, 'warn');
+      else saveResolvePrefs({ [key]: round && v !== null ? Math.round(v) : v });
+      renderResolveSwitch();
+    };
+  }
   $('ql-output-field').onclick = async () => {
     const p = await pick('save-wav', S.output || (S.files.input ? dir(S.files.input) : prefs().dir));
     if (p) { setOutput(p); updateButtons(); }

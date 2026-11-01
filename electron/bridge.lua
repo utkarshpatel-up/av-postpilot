@@ -638,7 +638,7 @@ local function encstart(a)
 end
 
 -- After a Quiet Lift render (toresolve.js): the lifted WAV into a bin, onto a timeline, then the Fairlight page.
--- a = { file, bin, timeline = 'current' | 'new', name }
+-- a = { file, bin, timeline = 'current' | 'new', name, isolation = Voice Isolation amount 0-100 or nil }
 local function chainimport(a)
   local r = connect()
   local _, p = project()
@@ -662,8 +662,21 @@ local function chainimport(a)
   p:SetCurrentTimeline(tl)
   local placed = mp:AppendToTimeline({ clip })
   if not placed or #placed == 0 then return { ok = false, error = 'could not place the file on timeline ' .. tl:GetName() } end
+  -- Voice Isolation on the clip's audio track (track FX, as in the Mixer); a miss is a warning, the clip is in
+  local track, warning
+  if a.isolation then
+    for _, item in ipairs(placed) do
+      local ti = item:GetTrackTypeAndIndex()
+      if ti and ti[1] == 'audio' then track = ti[2]; break end
+    end
+    local called, done = false, false
+    if track then
+      called, done = pcall(function() return tl:SetVoiceIsolationState(track, { isEnabled = true, amount = a.isolation }) end)
+    end
+    if not (called and done) then warning = 'could not turn on Voice Isolation (needs Resolve 20 or later)'; track = nil end
+  end
   r:OpenPage('fairlight')
-  return { ok = true, timeline = tl:GetName(), bin = a.bin, clip = clip:GetName() }
+  return { ok = true, timeline = tl:GetName(), bin = a.bin, clip = clip:GetName(), isolationTrack = track, warning = warning }
 end
 
 local function jobstatus(a)
