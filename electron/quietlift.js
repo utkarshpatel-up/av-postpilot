@@ -18,12 +18,14 @@ function installScripts(dir) {
 }
 
 // Also runs the Feedback Cutter engine (feedbackcutter.js): same protocol, its own name and arguments.
-// getExe: a frozen engine (Python built in) to run instead of python + script, or '' for none.
+// getExe: a frozen engine (Python built in) to run instead of python + script, or '' for none;
+// exeArgs: its arguments, when not the script's.
 class QuietLift {
-  constructor({ script, args = [], name = 'Quiet Lift', getPython = () => '', getExe = () => '', onLog = () => {} }) {
+  constructor({ script, args = [], exeArgs = args, name = 'Quiet Lift', getPython = () => '', getExe = () => '', onLog = () => {} }) {
     this.script = script;
     this.getExe = getExe;
     this.args = args;
+    this.exeArgs = exeArgs;
     this.name = name;
     this.getPython = getPython;
     this.onLog = onLog;
@@ -36,7 +38,7 @@ class QuietLift {
   start() {
     const exe = this.getExe();
     const python = exe || this.getPython() || defaultPython();
-    const proc = spawn(python, exe ? this.args : ['-u', this.script, ...this.args], { windowsHide: true });
+    const proc = spawn(python, exe ? this.exeArgs : ['-u', this.script, ...this.args], { windowsHide: true });
     this.proc = proc;
     proc.stdin.on('error', () => {});   // writing after it died: 'exit' reports that
     let stderr = '';

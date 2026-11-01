@@ -463,9 +463,13 @@ const handbrake = new HandBrake({
 const mediaPreview = new MediaPreview({ dir: path.join(DATA, 'previews'), findCli: () => findHandbrakeCli(settings.handbrake.cliPath) });
 
 // Quiet Lift: its Python engine starts the first time the page uses it.
+// A Python set on the page wins; otherwise the built-in engine (Windows), else the Python on PATH.
+const quietLiftPython = () => process.env.QUIET_LIFT_PYTHON || settings.quietLift.python;
 const quietLift = new QuietLift({
   script: installQuietLift(path.join(DATA, 'quietlift')),
-  getPython: () => process.env.QUIET_LIFT_PYTHON || settings.quietLift.python,
+  getPython: quietLiftPython,
+  getExe: () => (quietLiftPython() ? '' : feedbackCutter.bundledEngine()),
+  exeArgs: ['quiet-lift'],
   onLog: (msg) => { log('info', `Quiet Lift: ${msg}`); send('quietlift', { log: msg }); },
 });
 

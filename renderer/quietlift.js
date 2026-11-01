@@ -265,7 +265,7 @@ async function startEngine() {
   } catch (e) {
     $('ql-engine-dot').className = 'dot err';
     $('ql-engine').textContent = 'Engine offline';
-    toast('Python engine didn’t start', `${e.message}\nInstall Python with numpy + soundfile, or set its path in Detection settings.`, 'err');
+    toast('Quiet Lift engine didn’t start', `${e.message}\nIf a Python is set in the settings, it needs numpy + soundfile; blank uses the built-in engine.`, 'err');
   }
   renderSettings();
   renderEditor();
