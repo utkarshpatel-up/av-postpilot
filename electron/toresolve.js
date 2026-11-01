@@ -30,11 +30,12 @@ const isolationAmount = (v) => setting(v, 0, 100, true);   // as Resolve takes i
 // chainImport(args): the Resolve bridge; opts: the toResolve settings; editTimelines(): the open project's
 // Edit timelines with their clips' files (bridge.editTimelines).
 // name: the recording's name; a new timeline is named after its clip, channels side by side.
-async function sendToResolve({ file, name, chainImport, opts, editTimelines }) {
+// source: the original recording; its folder picks the Edit timeline (the file may be saved elsewhere).
+async function sendToResolve({ file, source, name, chainImport, opts, editTimelines }) {
   const { clip, channel } = splitChannel(name || stemOf(file));
   let edit = {}, note = null;
   if (opts.timeline !== 'current' && editTimelines) {
-    edit = timelineFor(file, await editTimelines().catch(() => []));
+    edit = timelineFor(source || file, await editTimelines().catch(() => []));
     if (edit.mismatch) note = `Put on ${edit.name} anyway, but ${edit.mismatch}.`;
   }
   const r = await chainImport({

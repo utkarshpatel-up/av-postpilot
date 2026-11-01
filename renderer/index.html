@@ -747,6 +747,17 @@
         <div class="drawer-body">
           <div id="ql-settings-body"></div>
           <div class="set-group">
+            <div class="set-group-title">Final audio</div>
+            <div class="set">
+              <label>Save to</label>
+              <div class="set-btns">
+                <button class="btn ghost" id="ql-outdir">Choose…</button>
+                <button class="btn ghost" id="ql-outdir-reset" title="Save next to the original recording">Reset</button>
+              </div>
+              <p><span id="ql-outdir-text">Next to the original recording</span>. Named "(cleaned+lifted)" when Feedback Cutter cleaned it first, else "(ql-lifted)".</p>
+            </div>
+          </div>
+          <div class="set-group">
             <div class="set-group-title">After Render: Resolve</div>
             <div class="set">
               <label for="ql-res-bin">Bin</label>
@@ -755,8 +766,8 @@
             </div>
             <div class="set">
               <label for="ql-res-timeline">Timeline</label>
-              <div class="num-input"><select id="ql-res-timeline"><option value="new">One per clip, channels side by side</option><option value="current">End of the current timeline</option></select></div>
-              <p>One per clip: 260910_0083-1 goes on A1 and 260910_0083-2 on A2 of timeline 260910_0083, both from the start. Resolve then opens the Fairlight page.</p>
+              <div class="num-input"><select id="ql-res-timeline"><option value="new">Edit timeline</option><option value="current">Current timeline</option></select></div>
+              <p>Edit timeline: a recording of a day folder goes on that day's Edit timeline (Rec 1, Rec 2 by channel, in clip order); any other on a timeline of its own, channels side by side. Current timeline: at its end. Resolve then opens the Fairlight page.</p>
             </div>
             <div class="set">
               <label for="ql-res-normalize">Normalize (dBFS)</label>

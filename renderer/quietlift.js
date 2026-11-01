@@ -162,6 +162,7 @@ function renderFiles() {
 }
 
 async function setFile(role, p) {
+  if (role === 'input') await leaveHeld(p);
   S.files[role] = p;
   delete S.meta[role];
   if (S.analysis) markStale();
@@ -176,10 +177,34 @@ async function setFile(role, p) {
 
 // "Talk-02 (fc-cleaned).wav" (saved by Feedback Cutter) -> "Talk-02"
 const recordingName = (p) => base(p).replace(/\.wav$/i, '').replace(/ \(fc-cleaned\)( \d+)?$/i, '');
+// Feedback Cutter keeps a Project files recording's cleaned audio in a hidden .postpilot folder in its Cam folder
+const isHeld = (p) => !!p && /[\\/]\.postpilot$/i.test(dir(p));
+const ownFolder = (p) => (isHeld(p) ? dir(dir(p)) : dir(p));
+
+// The final file, named for what was done: "Talk-02 (cleaned+lifted).wav" when Feedback Cutter cleaned it
+// first ("(fc-cleaned)"), else "Talk-02 (ql-lifted).wav"; a second one "... (ql-lifted) 2.wav".
+// In the Final audio folder (settings), or next to the original recording.
+async function setDefaultOutput() {
+  const p = S.files.input;
+  if (!p) return;
+  const stem = recordingName(p).replace(/[-_ ]?debleed$/i, '');
+  const folder = prefs().outDir || ownFolder(p);
+  const done = / \(fc-cleaned\)( \d+)?\.wav$/i.test(base(p)) ? 'cleaned+lifted' : 'ql-lifted';
+  const name = (i) => `${stem} (${done})${i > 1 ? ` ${i}` : ''}.wav`;
+  let i = 1;
+  while (await exists(join(folder, name(i)))) i++;
+  setOutput(join(folder, name(i)));
+}
+
+// Moving on from a held cleaned file that a final file was made from: Feedback Cutter's copy is deleted
+async function leaveHeld(next) {
+  const p = S.files.input;
+  if (isHeld(p) && S.rendered && p.toLowerCase() !== (next || '').toLowerCase()) await pilot.quietLift('discard-held', { path: p });
+}
 
 // 260910_0084-1-debleed.wav -> original 260910_0084-1.wav, other mic 260910_0084-2.wav
 async function guessCompanions(p) {
-  const folder = dir(p);
+  const folder = ownFolder(p);
   const stem = recordingName(p).replace(/[-_ ]?debleed$/i, '');
   const filled = [];
   const orig = join(folder, `${stem}.wav`);
@@ -200,9 +225,7 @@ async function guessCompanions(p) {
       }
     }
   }
-  let out = join(folder, `${stem}-lifted.wav`);
-  for (let i = 2; await exists(out); i++) out = join(folder, `${stem}-lifted-${i}.wav`);
-  setOutput(out);
+  await setDefaultOutput();
   if (filled.length) toast('Matched companion files', `Found the ${filled.join(' and ')} next to the debleed track.`, 'ok');
 }
 
@@ -676,7 +699,7 @@ async function render() {
 async function toResolve(file, btn) {
   btn.querySelector('span').textContent = 'Sending to Resolve…';
   log('Sending to Resolve…');
-  const r = await pilot.quietLift('to-resolve', { path: file, name: recordingName(S.files.input) });
+  const r = await pilot.quietLift('to-resolve', { path: file, source: S.files.original || S.files.input, name: recordingName(S.files.input) });
   if (!r.ok) return toast('Not sent to Resolve', r.error, 'err');
   const done = (r.normalized !== null ? ` Normalized to ${r.normalized} dBFS.` : '') +
     (r.isolationTrack ? ` Voice Isolation ${resolvePrefs().isolation} on A${r.isolationTrack}.` : '');
@@ -698,6 +721,7 @@ function renderResolveSwitch() {
   $('ql-to-resolve').classList.toggle('on', on);
   $('ql-to-resolve').lastElementChild.textContent = on ? 'Send to Resolve' : 'Off';
   $('ql-res-bin').value = resolvePrefs().bin;
+  $('ql-outdir-text').textContent = prefs().outDir || 'Next to the original recording';
   $('ql-res-timeline').value = resolvePrefs().timeline;
   $('ql-res-normalize').value = resolvePrefs().normalize ?? '';
   $('ql-res-isolation').value = resolvePrefs().isolation ?? '';
@@ -722,6 +746,7 @@ function offerNext() {
 // Feedback Cutter's "Cleaned WAV…" hands its file over: a new debleed track, nothing kept from the last one.
 window.qlTakeFile = (p) => {
   if (S.busy) return toast('Quiet Lift is busy', `Load ${base(p)} once it has finished.`, 'warn');
+  leaveHeld(p);
   S.files.original = '';
   S.files.other = '';
   S.meta = {};
@@ -773,6 +798,13 @@ function bind() {
     renderResolveSwitch();
   };
   $('ql-res-bin').onchange = () => saveResolvePrefs({ bin: $('ql-res-bin').value.trim() || 'Audio Chain' });
+  const setOutDir = async (d) => {
+    savePrefs({ outDir: d });
+    renderResolveSwitch();
+    if (!S.rendered) await setDefaultOutput();   // the file not rendered yet follows the new folder
+  };
+  $('ql-outdir').onclick = async () => { const d = await pick('pick-dir', prefs().outDir || prefs().dir); if (d) setOutDir(d); };
+  $('ql-outdir-reset').onclick = () => setOutDir('');
   $('ql-res-timeline').onchange = () => saveResolvePrefs({ timeline: $('ql-res-timeline').value });
   for (const [id, key, lo, hi, round] of [['ql-res-normalize', 'normalize', -60, 0, false], ['ql-res-isolation', 'isolation', 0, 100, true]]) {
     $(id).onchange = () => {

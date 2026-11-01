@@ -6,7 +6,8 @@ const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 
-const DEFAULTS = { python: '', editor: 'audition', editorPaths: {}, markInput: true, options: {}, dir: '' };
+// outDir: folder for the final (lifted) file, '' = next to the original recording
+const DEFAULTS = { python: '', editor: 'audition', editorPaths: {}, markInput: true, options: {}, dir: '', outDir: '' };
 const FILES = ['quiet_lift.py', 'quiet_lift_bridge.py', 'wav_markers.py'];
 const defaultPython = () => (process.platform === 'win32' ? 'python' : 'python3');
 

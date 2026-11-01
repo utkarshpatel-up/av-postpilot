@@ -120,6 +120,7 @@ async function analyze(path) {
   try {
     const r = await engine('analyze', { path, sensitivity_db: +$('fc-sens').value, max_spec_cols: specCols() });
     RESULT = r;
+    $('page-feedback').querySelector('[data-fc-export="cleaned"]').textContent = listed() ? 'Keep for Quiet Lift' : 'Cleaned WAV…';
     URLS = {};
     const f = r.files;
     await loadUrls([f.spec_before, f.spec_after, f.original_preview, f.cleaned_preview, f.removed_preview], Date.now());
@@ -445,16 +446,18 @@ async function exportFile(kind) {
   if ($('fc-apply').classList.contains('stale') && kind !== 'events_csv') {
     toast('Not applied yet', 'Your latest ticks aren’t in the cleaned audio. Click Apply first, or save anyway from the older version.', 'warn');
   }
-  const r = await pilot.feedback('export', { job: RESULT.job, name: RESULT.files[kind], source: RESULT.path, suffix: EXPORTS[kind] });
+  // a Project files recording's cleaned audio is kept for Quiet Lift without a Save dialog (main: holdFeedbackFile)
+  const keep = kind === 'cleaned' && listed();
+  const r = await pilot.feedback(keep ? 'hold' : 'export', { job: RESULT.job, name: RESULT.files[kind], source: RESULT.path, suffix: EXPORTS[kind] });
   if (!r.ok) return toast('Save failed', r.error, 'err');
   if (!r.path) return;
-  if (kind === 'cleaned' && listFile && listFile.toLowerCase() === RESULT.path.toLowerCase()) {
-    // a Project files recording: all of them get cleaned first, Quiet Lift's list picks them up later
+  if (keep) {
+    // all of them get cleaned first, Quiet Lift's Project files picks them up later
     const next = pf.next(RESULT.path);
-    const saved = r.path.split(/[\\/]/).pop();
+    const name = RESULT.path.split(/[\\/]/).pop();
     pf.refresh();
-    if (!next) return toast('Saved, last one in the project', `${saved}. Quiet Lift's Project files lists the cleaned recordings.`, 'ok');
-    return toast('Saved', `${saved}. Next: ${next.name}`, 'ok', { label: `Open ${next.name}`, run: () => pf.open(next) });
+    if (!next) return toast('Kept for Quiet Lift, last one in the project', `${name}. Quiet Lift's Project files lists the cleaned recordings.`, 'ok');
+    return toast('Kept for Quiet Lift', `${name}. Next: ${next.name}`, 'ok', { label: `Open ${next.name}`, run: () => pf.open(next) });
   }
   if (kind === 'cleaned') {
     // next step of the chain: the cleaned WAV becomes Quiet Lift's debleed track
@@ -690,6 +693,9 @@ bind();
 updateBandChipTitles();
 
 // Project files: the recorder audio of the open Resolve project's Edit timelines (renderer/projectfiles.js)
+function listed() {
+  return !!(RESULT && listFile && listFile.toLowerCase() === RESULT.path.toLowerCase());
+}
 function openListed(file) {
   listFile = file;
   analyze(file);

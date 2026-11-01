@@ -80,3 +80,15 @@ test('when Resolve refuses, the error names the file and the reason', async () =
     /Resolve did not take a-lifted\.wav: No project open in Resolve/,
   );
 });
+
+test('a final file saved in another folder still goes on the Edit timeline of its original recording', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tr-'));
+  const day = path.join(root, '2978 Dt-03 Jun 2026');
+  const timelines = [{ name: 'Edit-2978', files: [path.join(day, 'Topic E Dt-03-Jun-26', 'Clip-01.mov')] }];
+  const f = fake((a) => ({ ok: true, timeline: a.edit || a.name, bin: a.bin }));
+  await sendToResolve({
+    file: path.join(root, 'Finals', '260603_0083-1 (cleaned+lifted).wav'), source: path.join(day, 'Cam-04 (Audio)', '260603_0083-1.wav'),
+    name: '260603_0083-1', chainImport: f.chainImport, opts: DEFAULTS, editTimelines: async () => timelines,
+  });
+  assert.deepStrictEqual([f.calls[0].edit, f.calls[0].clipNo, f.calls[0].channel], ['Edit-2978', 83, 1]);
+});

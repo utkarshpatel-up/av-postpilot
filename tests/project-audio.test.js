@@ -70,3 +70,27 @@ test('a day with two sessions: each Cam folder belongs to the Edit timeline of i
   assert.deepStrictEqual(missing, ['Edit-4000']);
   assert.strictEqual(timelineFor(path.join(root, s2, 'Clips for Insert/Cam-02 (Audio)/260910_0090-1-lifted.wav'), timelines).name, 'Edit-3001 E2');
 });
+
+test('the cleaned copy kept in .postpilot and the final "(cleaned+lifted)" file, next to it or in the chosen folder', () => {
+  const day = '2978 Dt-03 Jun 2026';
+  const cam = `${day}/Clips for Insert/Cam-04 (Audio)`;
+  const root = tree([
+    `${day}/Topic E Dt-03-Jun-26/Clip-01.mov`,
+    `${cam}/260603_0083-1.wav`, `${cam}/260603_0083-2.wav`, `${cam}/260603_0084-1.wav`,
+    `${cam}/.postpilot/260603_0083-1 (fc-cleaned).wav`, `${cam}/.postpilot/260603_0083-2 (fc-cleaned).wav`,
+    `${cam}/260603_0083-1 (cleaned+lifted).wav`,                // final next to the recording
+    'Finals/260603_0083-2 (cleaned+lifted) 2.wav',              // final in the chosen folder
+    `${cam}/260603_0084-1 (ql-lifted).wav`,                     // lifted without cleaning first
+  ]);
+  const timelines = [{ name: 'Edit-2978', files: [path.join(root, `${day}/Topic E Dt-03-Jun-26/Clip-01.mov`)] }];
+  const { rows } = projectAudio(timelines, { outDir: path.join(root, 'Finals') });
+  assert.deepStrictEqual(rows.map((r) => [r.name, path.basename(r.cleaned), path.basename(r.lifted)]), [
+    ['260603_0083-1', '260603_0083-1 (fc-cleaned).wav', '260603_0083-1 (cleaned+lifted).wav'],
+    ['260603_0083-2', '260603_0083-2 (fc-cleaned).wav', '260603_0083-2 (cleaned+lifted) 2.wav'],
+    ['260603_0084-1', '', '260603_0084-1 (ql-lifted).wav'],
+  ]);
+  assert.strictEqual(path.basename(path.dirname(rows[0].cleaned)), '.postpilot');
+  // a final saved in the chosen folder goes on the Edit timeline of its original recording
+  assert.strictEqual(timelineFor(path.join(root, 'Finals', '260603_0083-2 (cleaned+lifted) 2.wav'), timelines).why !== undefined, true);
+  assert.deepStrictEqual(timelineFor(path.join(root, cam, '260603_0083-2.wav'), timelines), { name: 'Edit-2978', clip: 83 });
+});

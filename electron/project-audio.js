@@ -8,8 +8,13 @@ const { dayNumber, clipNumber } = require('./project-setup');
 
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 const AUDIO_DIR = /^cam[-\s]*\d+.*\(audio\)$/i;
-const DERIVED = / \(fc-[a-z]+\)( \d+)?$|-lifted(-\d+)?$/i;   // Feedback Cutter / Quiet Lift output, not recordings
+// Feedback Cutter / Quiet Lift output, not recordings: "(fc-cleaned)", "(ql-lifted)", "(cleaned+lifted)"
+// (both done), and the older "-lifted"
+const DERIVED = / \((fc-[a-z]+|ql-lifted|cleaned\+lifted)\)( \d+)?$|-lifted(-\d+)?$/i;
 const NOT_RECORDING = /^RX Temp Save File/i;                      // iZotope RX's own temporary saves
+// Feedback Cutter keeps a Project files recording's cleaned audio here, inside its Cam folder, until
+// Quiet Lift has made the final file from it (no Save dialog in between)
+const HELD_DIR = '.postpilot';
 const natural = (a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
 const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -66,31 +71,38 @@ const owner = (dir, timelines) => timelines.reduce((best, t) => {
   return score > best.score ? { t, score } : best;
 }, { t: timelines[0], score: -1 }).t;
 
-// The newest of the files in dir whose names match re, or ''
-function newest(dir, names, re) {
-  const hits = names.filter((n) => re.test(n)).map((n) => path.join(dir, n));
+const wavsIn = (dir) => {
+  try { return fs.readdirSync(dir).filter((n) => /\.wav$/i.test(n)).map((n) => path.join(dir, n)); } catch { return []; }
+};
+// The newest of these files whose names match re, or ''
+function newest(files, re) {
+  const hits = files.filter((f) => re.test(path.basename(f)));
   return hits.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0] || '';
 }
 
-// The recordings in one Cam-XX (Audio) folder, with their cleaned (FC) and lifted (QL) versions if saved
-function recordings(dir, date) {
-  const names = fs.readdirSync(dir).filter((n) => /\.wav$/i.test(n));
-  const stemOf = (n) => n.replace(/\.wav$/i, '');
-  return names.filter((n) => !DERIVED.test(stemOf(n)) && !NOT_RECORDING.test(n)).map((n) => {
-    const stem = stemOf(n);
+// The recordings in one Cam-XX (Audio) folder, with their cleaned (FC: held, or saved next to it) and final
+// (QL: "(cleaned+lifted)", or "(ql-lifted)" when not cleaned first; next to it or in outDir) versions if made
+function recordings(dir, date, outDir) {
+  const own = wavsIn(dir);
+  const held = wavsIn(path.join(dir, HELD_DIR));
+  const out = outDir && path.resolve(outDir).toLowerCase() !== path.resolve(dir).toLowerCase() ? wavsIn(outDir) : [];
+  const stemOf = (f) => path.basename(f).replace(/\.wav$/i, '');
+  return own.filter((f) => !DERIVED.test(stemOf(f)) && !NOT_RECORDING.test(path.basename(f))).map((f) => {
+    const stem = stemOf(f);
     const rec = recorderName(stem);
     return {
-      file: path.join(dir, n), name: stem, clip: rec.clip, channel: rec.channel, date: rec.date,
+      file: f, name: stem, clip: rec.clip, channel: rec.channel, date: rec.date,
       dateOk: rec.date ? rec.date === date : null,   // null: nothing in the name to check
-      cleaned: newest(dir, names, new RegExp(`^${esc(stem)} \\(fc-cleaned\\)( \\d+)?\\.wav$`, 'i')),
-      lifted: newest(dir, names, new RegExp(`^${esc(stem)}-lifted(-\\d+)?\\.wav$`, 'i')),
+      cleaned: newest([...held, ...own], new RegExp(`^${esc(stem)} \\(fc-cleaned\\)( \\d+)?\\.wav$`, 'i')),
+      lifted: newest([...own, ...out], new RegExp(`^${esc(stem)}( \\((cleaned\\+lifted|ql-lifted)\\)( \\d+)?|-lifted(-\\d+)?)\\.wav$`, 'i')),
     };
   });
 }
 
 // timelines: [{ name, files }] from the bridge (edittimelines) -> { rows, missing }: one row per recording,
 // in timeline, camera, clip, channel order; missing = Edit timelines whose day folder wasn't found.
-function projectAudio(timelines) {
+// outDir: Quiet Lift's folder for final files, when not next to the recordings.
+function projectAudio(timelines, { outDir = '' } = {}) {
   const days = new Map();
   const missing = [];
   for (const t of timelines) {
@@ -104,7 +116,7 @@ function projectAudio(timelines) {
     const date = dayDate(path.basename(day));
     for (const dir of audioDirs(day)) {
       const t = tls.length > 1 ? owner(dir, tls) : tls[0];
-      for (const r of recordings(dir, date)) rows.push({ ...r, day: path.basename(day), dayDate: date, timeline: t.name, cam: path.basename(dir) });
+      for (const r of recordings(dir, date, outDir)) rows.push({ ...r, day: path.basename(day), dayDate: date, timeline: t.name, cam: path.basename(dir) });
     }
   }
   const order = new Map(timelines.map((t, i) => [t.name, i]));
@@ -130,4 +142,4 @@ function timelineFor(file, timelines) {
   return { name: t.name, clip: rec.clip, ...(mismatch && { mismatch }) };
 }
 
-module.exports = { dayDate, recorderName, dayFolder, audioDirs, projectAudio, timelineFor };
+module.exports = { HELD_DIR, dayDate, recorderName, dayFolder, audioDirs, projectAudio, timelineFor };
