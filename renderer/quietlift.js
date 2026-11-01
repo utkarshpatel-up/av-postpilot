@@ -651,14 +651,11 @@ async function render() {
   btn.classList.add('loading');
   btn.querySelector('span').textContent = 'Rendering…';
   try {
-    // normalized only on its way to Resolve (Fairlight's Normalize Audio Level, Sample Peak Program)
-    const normalize = resolvePrefs().enabled ? resolvePrefs().normalize ?? null : null;
-    const r = await engine('render', { output: S.output, skipped: [...S.skipped], mark_input: prefs().markInput, normalize });
+    const r = await engine('render', { output: S.output, skipped: [...S.skipped], mark_input: prefs().markInput });
     S.rendered = { output: r.output, skips: skipKey(), markedInput: r.marked_input };
     if (r.marked_input) S.inputMarks = skipKey();
     if (r.marked_input) a.marked = r.markers;
-    toast('Render complete', `${base(r.output)}: ${a.stretches.length - S.skipped.size} stretch(es) lifted, ` +
-      (normalize === null ? 'the rest is bit-for-bit.' : `then normalized to a ${normalize} dBFS peak.`) +
+    toast('Render complete', `${base(r.output)}: ${a.stretches.length - S.skipped.size} stretch(es) lifted, the rest is bit-for-bit.` +
       ` ${r.markers} QL marker(s) added to ${r.marked_input ? 'both files' : 'the lifted file'}.`, 'ok',
       { label: 'Show in folder', run: () => pilot.quietLift('reveal', { path: r.output }) });
     for (const msg of Object.values(r.marker_errors)) toast('Markers not added', msg, 'warn');
@@ -680,10 +677,11 @@ async function toResolve(file, btn) {
   log('Sending to Resolve…');
   const r = await pilot.quietLift('to-resolve', { path: file, name: recordingName(S.files.input) });
   if (!r.ok) return toast('Not sent to Resolve', r.error, 'err');
-  const iso = r.isolationTrack ? ` Voice Isolation ${resolvePrefs().isolation} on audio track ${r.isolationTrack}.` : '';
-  log(`In Resolve: ${base(r.file)} in bin "${r.bin}", timeline "${r.timeline}".${iso}`);
-  toast('In Resolve', `${base(r.file)} is in bin "${r.bin}" and on timeline "${r.timeline}".${iso}`, 'ok');
-  if (r.warning) toast('Voice Isolation not set', r.warning, 'warn');
+  const done = (r.normalized !== null ? ` Normalized to ${r.normalized} dBFS.` : '') +
+    (r.isolationTrack ? ` Voice Isolation ${resolvePrefs().isolation} on audio track ${r.isolationTrack}.` : '');
+  log(`In Resolve: ${base(r.file)} in bin "${r.bin}", timeline "${r.timeline}".${done}`);
+  toast('In Resolve', `${base(r.file)} is in bin "${r.bin}" and on timeline "${r.timeline}".${done}`, 'ok');
+  if (r.warning) toast('Not all done in Resolve', r.warning, 'warn');
 }
 
 // "-6.3" -> -6.3, blank -> null (off); outside lo..hi -> undefined (not taken)

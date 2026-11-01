@@ -281,42 +281,29 @@ def gain_curve(a, skipped=()):
     return gain
 
 
-def lifted_blocks(a, gain, start=None, end=None, apply_gain=True):
-    """The input with `gain` applied, block by block. start / end (seconds) give just that part."""
+def render(a, output, gain, start=None, end=None, apply_gain=True):
+    """Write the input with `gain` applied. start / end (seconds) write just that part (for previews)."""
     sr, hop, info = a.sr, a.hop, a.info
     first = 0 if start is None else max(0, int(start * sr))
     last = info.frames if end is None else min(info.frames, int(end * sr))
     centers = (np.arange(len(gain)) + 0.5) * hop
     ceil_lin = 10 ** (a.args.ceiling / 20)
     pos = first
-    for b in sf.blocks(a.args.input, blocksize=hop * 3000, dtype="float32", always_2d=True,
-                       start=first, stop=last):
-        m = len(b)
-        g = np.interp(np.arange(pos, pos + m), centers, gain)
-        y = b.copy()
-        on = g > 0
-        if apply_gain and on.any():
-            y[on] = b[on] * (10 ** (g[on] / 20)).astype(np.float32)[:, None]
-            lim = np.maximum(ceil_lin, np.abs(b))  # never push a sample past the ceiling (or past itself if already over)
-            over = on[:, None] & (np.abs(y) > lim)
-            y[over] = np.sign(y[over]) * lim[over]
-        yield y
-        pos += m
-
-
-def normalize_scale(a, gain, target_db):
-    """Factor that puts the lifted output's highest sample peak at target_db (Fairlight's Sample Peak Program)."""
-    peak = max((float(np.max(np.abs(y))) for y in lifted_blocks(a, gain) if len(y)), default=0.0)
-    return 10 ** (target_db / 20) / peak if peak > 0 else 1.0
-
-
-def render(a, output, gain, start=None, end=None, apply_gain=True, scale=1.0):
-    """Write the input with `gain` applied, times `scale`. start / end (seconds) write just that part (for previews)."""
-    info = a.info
-    with sf.SoundFile(output, "w", samplerate=a.sr, channels=info.channels,
+    with sf.SoundFile(output, "w", samplerate=sr, channels=info.channels,
                       subtype=info.subtype, format=info.format) as out:
-        for y in lifted_blocks(a, gain, start, end, apply_gain):
-            out.write(y * np.float32(scale) if scale != 1.0 else y)
+        for b in sf.blocks(a.args.input, blocksize=hop * 3000, dtype="float32", always_2d=True,
+                           start=first, stop=last):
+            m = len(b)
+            g = np.interp(np.arange(pos, pos + m), centers, gain)
+            y = b.copy()
+            on = g > 0
+            if apply_gain and on.any():
+                y[on] = b[on] * (10 ** (g[on] / 20)).astype(np.float32)[:, None]
+                lim = np.maximum(ceil_lin, np.abs(b))  # never push a sample past the ceiling (or past itself if already over)
+                over = on[:, None] & (np.abs(y) > lim)
+                y[over] = np.sign(y[over]) * lim[over]
+            out.write(y)
+            pos += m
 
 
 def main():

@@ -638,7 +638,7 @@ local function encstart(a)
 end
 
 -- After a Quiet Lift render (toresolve.js): the lifted WAV into a bin, onto a timeline, then the Fairlight page.
--- a = { file, bin, timeline = 'current' | 'new', name, isolation = Voice Isolation amount 0-100 or nil }
+-- a = { file, bin, timeline = 'current' | 'new', name, normalize = dBFS sample peak or nil, isolation = Voice Isolation 0-100 or nil }
 local function chainimport(a)
   local r = connect()
   local _, p = project()
@@ -662,21 +662,31 @@ local function chainimport(a)
   p:SetCurrentTimeline(tl)
   local placed = mp:AppendToTimeline({ clip })
   if not placed or #placed == 0 then return { ok = false, error = 'could not place the file on timeline ' .. tl:GetName() } end
-  -- Voice Isolation on the clip's audio track (track FX, as in the Mixer); a miss is a warning, the clip is in
-  local track, warning
+  -- Then Normalize Audio Level on the clip and Voice Isolation on its track (track FX, as in the Mixer).
+  -- Either one missing is a warning: the clip is in by now.
+  local item, track, normalized
+  for _, it in ipairs(placed) do
+    local ti = it:GetTrackTypeAndIndex()
+    if ti and ti[1] == 'audio' then item, track = it, ti[2]; break end
+  end
+  local warnings = {}
+  local function try(f) local called, done = pcall(f); return called and done end
+  if a.normalize then
+    if item and try(function()
+      return tl:NormalizeAudioLevel({ item }, { normalizationMode = 'Sample Peak Program', targetLevel = a.normalize,
+        setLevelMode = r.NORMALIZE_AUDIO_SET_LEVEL_RELATIVE })
+    end) then normalized = a.normalize
+    else warnings[#warnings + 1] = 'could not normalize (needs Resolve 21.1 or later, this is ' .. r:GetVersionString() .. ')' end
+  end
+  local isolationTrack
   if a.isolation then
-    for _, item in ipairs(placed) do
-      local ti = item:GetTrackTypeAndIndex()
-      if ti and ti[1] == 'audio' then track = ti[2]; break end
-    end
-    local called, done = false, false
-    if track then
-      called, done = pcall(function() return tl:SetVoiceIsolationState(track, { isEnabled = true, amount = a.isolation }) end)
-    end
-    if not (called and done) then warning = 'could not turn on Voice Isolation (needs Resolve 20 or later)'; track = nil end
+    if track and try(function() return tl:SetVoiceIsolationState(track, { isEnabled = true, amount = a.isolation }) end) then
+      isolationTrack = track
+    else warnings[#warnings + 1] = 'could not turn on Voice Isolation (needs Resolve 20 or later)' end
   end
   r:OpenPage('fairlight')
-  return { ok = true, timeline = tl:GetName(), bin = a.bin, clip = clip:GetName(), isolationTrack = track, warning = warning }
+  return { ok = true, timeline = tl:GetName(), bin = a.bin, clip = clip:GetName(), normalized = normalized,
+    isolationTrack = isolationTrack, warning = #warnings > 0 and table.concat(warnings, '; ') or nil }
 end
 
 local function jobstatus(a)
