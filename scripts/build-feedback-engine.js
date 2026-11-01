@@ -1,6 +1,8 @@
-// Freezes the Feedback Cutter engine (electron/feedbackcutter/feedback_bridge.py + dsp.py) with
-// Python, numpy, scipy, soundfile, matplotlib and FFmpeg into vendor/feedback-engine/win/, which the
-// Windows build packs into the app (resources/feedback-engine): nobody needs Python installed.
+// Freezes the audio engines, Feedback Cutter (electron/feedbackcutter/feedback_bridge.py + dsp.py) and
+// Quiet Lift (electron/quietlift/quiet_lift_bridge.py + quiet_lift.py), with Python, numpy, scipy,
+// soundfile, matplotlib and FFmpeg into vendor/feedback-engine/win/, which the Windows build packs
+// into the app (resources/feedback-engine): nobody needs Python installed. One exe for both
+// (scripts/feedback-engine-main.py picks the engine), so the packages are in the app once.
 //   node scripts/build-feedback-engine.js [--force]
 // Needs Python 3 on the build PC (FEEDBACK_ENGINE_PYTHON, else `py -3`, else `python`); the packages
 // come from scripts/feedback-engine-requirements.txt into vendor/feedback-engine/venv.
@@ -18,10 +20,13 @@ const stamp = path.join(dest, 'SOURCES');
 const venv = path.join(BASE, 'venv');
 const venvPython = path.join(venv, 'Scripts', 'python.exe');
 const requirements = path.join(__dirname, 'feedback-engine-requirements.txt');
-const sources = [requirements, __filename, ...['dsp.py', 'feedback_bridge.py'].map((f) => path.join(ROOT, 'electron', 'feedbackcutter', f))];
+const entry = path.join(__dirname, 'feedback-engine-main.py');
+const sources = [requirements, __filename, entry,
+  ...['dsp.py', 'feedback_bridge.py'].map((f) => path.join(ROOT, 'electron', 'feedbackcutter', f)),
+  ...['quiet_lift.py', 'quiet_lift_bridge.py', 'wav_markers.py'].map((f) => path.join(ROOT, 'electron', 'quietlift', f))];
 
 if (process.platform !== 'win32') {
-  console.log('Feedback Cutter engine: only built for Windows; elsewhere the page uses the Python on PATH');
+  console.log('Audio engine: only built for Windows; elsewhere the pages use the Python on PATH');
   process.exit(0);
 }
 
@@ -30,7 +35,7 @@ const hash = crypto.createHash('sha256');
 for (const f of sources) hash.update(fs.readFileSync(f));
 const digest = hash.digest('hex');
 if (!process.argv.includes('--force') && fs.existsSync(exe) && fs.existsSync(stamp) && fs.readFileSync(stamp, 'utf8').trim() === digest) {
-  console.log(`Feedback Cutter engine is already in ${path.relative(ROOT, dest)}`);
+  console.log(`Audio engine is already in ${path.relative(ROOT, dest)}`);
   process.exit(0);
 }
 
@@ -40,7 +45,7 @@ function basePython() {
   for (const [cmd, ...pre] of tries) {
     try { execFileSync(cmd, [...pre, '--version'], { stdio: 'ignore' }); return [cmd, pre]; } catch {}
   }
-  throw new Error('Python 3 is needed to build the Feedback Cutter engine (set FEEDBACK_ENGINE_PYTHON)');
+  throw new Error('Python 3 is needed to build the audio engine (set FEEDBACK_ENGINE_PYTHON)');
 }
 
 if (!fs.existsSync(venvPython)) {
@@ -54,10 +59,10 @@ const work = path.join(BASE, 'pyinstaller');
 fs.rmSync(dest, { recursive: true, force: true });
 run(venvPython, ['-m', 'PyInstaller', '--noconfirm', '--clean', '--onedir', '--log-level', 'WARN',
   '--name', 'feedback-engine', '--distpath', dest, '--workpath', work, '--specpath', work,
-  '--paths', path.join(ROOT, 'electron', 'feedbackcutter'),
+  '--paths', path.join(ROOT, 'electron', 'feedbackcutter'), '--paths', path.join(ROOT, 'electron', 'quietlift'),
   '--collect-all', 'imageio_ffmpeg',   // its FFmpeg: MP3 previews and non-WAV recordings
   ...['tkinter', 'IPython', 'PyQt5', 'PySide6', 'pytest'].flatMap((m) => ['--exclude-module', m]),
-  path.join(ROOT, 'electron', 'feedbackcutter', 'feedback_bridge.py')]);
+  entry]);
 if (!fs.existsSync(exe)) throw new Error(`PyInstaller did not produce ${exe}`);
 fs.writeFileSync(stamp, `${digest}\n`);
-console.log(`Feedback Cutter engine → ${path.relative(ROOT, path.dirname(exe))}`);
+console.log(`Audio engine (Feedback Cutter, Quiet Lift) → ${path.relative(ROOT, path.dirname(exe))}`);

@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('pilot', {
   handbrake: (action, args) => ipcRenderer.invoke('handbrake', { action, args }),
   quietLift: (action, args) => ipcRenderer.invoke('quietlift', { action, args }),
   feedback: (action, args) => ipcRenderer.invoke('feedback', { action, args }),
+  projectAudio: () => ipcRenderer.invoke('project-audio'),
   encPreview: (action, file) => ipcRenderer.invoke('enc-preview', { action, file }),
   pickFiles: (current) => ipcRenderer.invoke('pick-files', current),
   pickImage: () => ipcRenderer.invoke('pick-image'),

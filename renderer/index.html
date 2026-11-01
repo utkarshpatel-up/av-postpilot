@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="quietlift.css">
   <link rel="stylesheet" href="feedback.css">
+  <link rel="stylesheet" href="projectfiles.css">
 </head>
 <body>
   <aside class="sidebar">
@@ -618,6 +619,10 @@
           <div class="engine"><span class="dot" id="ql-engine-dot"></span><span id="ql-engine">Engine not started</span></div>
         </div>
         <div class="hero-actions">
+          <button class="btn ghost" id="ql-btn-project" title="Recorder audio of the Edit timelines in the open Resolve project">
+            <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+            Project files
+          </button>
           <button class="btn ghost" id="ql-btn-settings">
             <svg viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
             Detection settings
@@ -628,6 +633,8 @@
           </button>
         </div>
       </section>
+
+      <section class="card pf" id="ql-pf" hidden></section>
 
       <!-- files -->
       <section class="files" id="ql-files"></section>
@@ -740,6 +747,17 @@
         <div class="drawer-body">
           <div id="ql-settings-body"></div>
           <div class="set-group">
+            <div class="set-group-title">Final audio</div>
+            <div class="set">
+              <label>Save to</label>
+              <div class="set-btns">
+                <button class="btn ghost" id="ql-outdir">Choose…</button>
+                <button class="btn ghost" id="ql-outdir-reset" title="Save next to the original recording">Reset</button>
+              </div>
+              <p><span id="ql-outdir-text">Next to the original recording</span>. Named "(cleaned+lifted)" when Feedback Cutter cleaned it first, else "(ql-lifted)".</p>
+            </div>
+          </div>
+          <div class="set-group">
             <div class="set-group-title">After Render: Resolve</div>
             <div class="set">
               <label for="ql-res-bin">Bin</label>
@@ -748,8 +766,8 @@
             </div>
             <div class="set">
               <label for="ql-res-timeline">Timeline</label>
-              <div class="num-input"><select id="ql-res-timeline"><option value="new">New, named after the recording</option><option value="current">End of the current timeline</option></select></div>
-              <p>Resolve then opens the Fairlight page.</p>
+              <div class="num-input"><select id="ql-res-timeline"><option value="new">Edit timeline</option><option value="current">Current timeline</option></select></div>
+              <p>Edit timeline: a recording of a day folder goes on that day's Edit timeline (Rec 1, Rec 2 by channel, in clip order); any other on a timeline of its own, channels side by side. Current timeline: at its end. Resolve then opens the Fairlight page.</p>
             </div>
             <div class="set">
               <label for="ql-res-normalize">Normalize (dBFS)</label>
@@ -766,8 +784,8 @@
             <div class="set-group-title">Engine</div>
             <div class="set">
               <label for="ql-python">Python</label>
-              <div class="num-input"><input id="ql-python" placeholder="python" spellcheck="false"></div>
-              <p>Python with numpy and soundfile. Blank = the one on PATH.</p>
+              <div class="num-input"><input id="ql-python" placeholder="Built-in engine" spellcheck="false"></div>
+              <p>Blank = the built-in engine (Windows; elsewhere the Python on PATH). Only to use another Python, with numpy and soundfile.</p>
             </div>
           </div>
         </div>
@@ -782,6 +800,13 @@
     <section class="page" id="page-feedback">
       <h1>Feedback Cutter</h1>
       <p class="lead">Open a speech recording (talk, satsang) and every feedback ring is found and notched out. Check the list, listen before/after, then save the cleaned WAV.</p>
+      <div class="pf-bar">
+        <button class="btn ghost" id="fc-btn-project" title="Recorder audio of the Edit timelines in the open Resolve project">
+          <svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+          Project files
+        </button>
+      </div>
+      <div class="card pf" id="fc-pf" hidden></div>
 
       <div class="fc-top">
         <div class="drop" id="fc-drop">
@@ -1175,6 +1200,7 @@
   <script src="premiere.js"></script>
   <script src="night.js"></script>
   <script src="handbrake.js"></script>
+  <script src="projectfiles.js"></script>
   <script src="quietlift.js"></script>
   <script src="feedback.js"></script>
   <script src="encrange.js"></script>

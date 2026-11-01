@@ -21,6 +21,7 @@ const HANDBRAKE_VERSION = require('../package.json').handbrakeCli.version;
 const { QuietLift, DEFAULTS: QUIET_LIFT_DEFAULTS, installScripts: installQuietLift } = require('./quietlift');
 const feedbackCutter = require('./feedbackcutter');
 const toResolve = require('./toresolve');
+const projectAudio = require('./project-audio');
 const { Stabilization } = require('./stabilization');
 const { createFrameGrabber } = require('./stabilization-frames');
 const { PremiereImport } = require('./premiere-import');
@@ -463,9 +464,13 @@ const handbrake = new HandBrake({
 const mediaPreview = new MediaPreview({ dir: path.join(DATA, 'previews'), findCli: () => findHandbrakeCli(settings.handbrake.cliPath) });
 
 // Quiet Lift: its Python engine starts the first time the page uses it.
+// A Python set on the page wins; otherwise the built-in engine (Windows), else the Python on PATH.
+const quietLiftPython = () => process.env.QUIET_LIFT_PYTHON || settings.quietLift.python;
 const quietLift = new QuietLift({
   script: installQuietLift(path.join(DATA, 'quietlift')),
-  getPython: () => process.env.QUIET_LIFT_PYTHON || settings.quietLift.python,
+  getPython: quietLiftPython,
+  getExe: () => (quietLiftPython() ? '' : feedbackCutter.bundledEngine()),
+  exeArgs: ['quiet-lift'],
   onLog: (msg) => { log('info', `Quiet Lift: ${msg}`); send('quietlift', { log: msg }); },
 });
 
@@ -976,14 +981,34 @@ ipcMain.handle('enc-preview', async (_e, { action, file }) => {
     return { ok: false, error: 'Unknown preview action' };
   } catch (err) { return { ok: false, error: err.message }; }
 });
+// The open project's Edit timelines with the files their clips come from (project-audio.js)
+async function editTimelines() {
+  const r = await bridge.editTimelines();
+  if (!r.ok) throw new Error(r.error);
+  return r.timelines;
+}
+
+// Project files list on the Feedback Cutter and Quiet Lift pages: the recorder audio of every Edit timeline
+ipcMain.handle('project-audio', async () => {
+  try {
+    const found = projectAudio.projectAudio(await editTimelines(), { outDir: settings.quietLift.outDir });
+    return { ok: true, project: status.project?.name || '', ...found };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
 ipcMain.handle('quietlift', async (_e, { action, args = {} }) => {
   try {
     if (action === 'call') return { ok: true, data: await quietLift.call(args.cmd, args.payload) };
     if (action === 'restart') { quietLift.stop(); return { ok: true }; }
     // after Render: into Resolve (bin, timeline, Fairlight page)
     if (action === 'to-resolve') {
-      const r = await toResolve.sendToResolve({ file: args.path, name: args.name, chainImport: (a) => bridge.chainImport(a), opts: settings.toResolve });
-      log('info', `Quiet Lift: ${path.basename(r.file)} is on timeline "${r.timeline}" in bin "${r.bin}"`);
+      const r = await toResolve.sendToResolve({
+        file: args.path, source: args.source, name: args.name, opts: settings.toResolve,
+        chainImport: (a) => bridge.chainImport(a), editTimelines,
+      });
+      log('info', `Quiet Lift: ${path.basename(r.file)} is on timeline "${r.timeline}"${r.track ? ` (A${r.track})` : ''} in bin "${r.bin}"`);
       return { ok: true, ...r };
     }
     if (action === 'reveal') { shell.showItemInFolder(args.path); return { ok: true }; }
@@ -995,6 +1020,19 @@ ipcMain.handle('quietlift', async (_e, { action, args = {} }) => {
         filters: exe ? (process.platform === 'win32' ? [{ name: 'Programs', extensions: ['exe'] }] : []) : WAV,
       });
       return { ok: true, path: r.canceled ? null : r.filePaths[0] };
+    }
+    if (action === 'pick-dir') {
+      const r = await dialog.showOpenDialog(win, { title: 'Folder for the final audio', defaultPath: args.current || undefined, properties: ['openDirectory', 'createDirectory'] });
+      return { ok: true, path: r.canceled ? null : r.filePaths[0] };
+    }
+    // Feedback Cutter's held copy (holdFeedbackFile) once Quiet Lift has made the final file from it: only
+    // a "(fc-cleaned)" WAV inside a .postpilot folder, and the folder too when that leaves it empty
+    if (action === 'discard-held') {
+      const folder = path.dirname(args.path);
+      if (path.basename(folder) !== projectAudio.HELD_DIR || !/ \(fc-cleaned\)( \d+)?\.wav$/i.test(args.path)) return { ok: false, error: 'Not a held file' };
+      await fs.promises.rm(args.path, { force: true });
+      if (!(await fs.promises.readdir(folder)).length) await fs.promises.rmdir(folder).catch(() => {});
+      return { ok: true };
     }
     if (action === 'save-wav') {
       const r = await dialog.showSaveDialog(win, { title: 'Save the lifted file', defaultPath: args.current || undefined, filters: WAV });
@@ -1019,6 +1057,22 @@ async function saveFeedbackFile(args) {
     send('feedback', { saved: true });
   }
   return r.filePath;
+}
+// A Project files recording's cleaned audio, without a Save dialog: into the hidden .postpilot folder next to the
+// recording, where Quiet Lift's Project files picks it up; Quiet Lift deletes it once the final file is made.
+async function holdFeedbackFile(args) {
+  const file = feedbackCutter.jobFile(FEEDBACK_WORK, args.job, args.name);
+  const folder = path.join(path.dirname(args.source), projectAudio.HELD_DIR);
+  await fs.promises.mkdir(folder, { recursive: true });
+  if (process.platform === 'win32') execFile('attrib', ['+h', folder], { windowsHide: true }, () => {});
+  const dest = path.join(folder, feedbackCutter.exportName(args.source, 'cleaned', 'wav'));
+  await fs.promises.copyFile(file, dest);
+  log('info', `Feedback Cutter: kept ${dest} for Quiet Lift`);
+  if (feedbackUnsaved && args.job === feedbackUnsaved.job && args.name === feedbackUnsaved.name) {
+    feedbackUnsaved = null;
+    send('feedback', { saved: true });
+  }
+  return dest;
 }
 // Cleaned audio exists only in the work folder until it is saved, and that folder is emptied
 // when another recording is opened or PostPilot starts again. True = go ahead (saved or discarded).
@@ -1058,6 +1112,7 @@ ipcMain.handle('feedback', async (_e, { action, args = {} }) => {
       return { ok: true, path: r.canceled ? null : r.filePaths[0] };
     }
     if (action === 'export') return { ok: true, path: await saveFeedbackFile(args) };
+    if (action === 'hold') return { ok: true, path: await holdFeedbackFile(args) };
     // the cleaned audio the page has not saved yet ({ job, name, source } or null)
     if (action === 'unsaved') { feedbackUnsaved = args.unsaved || null; return { ok: true }; }
     if (action === 'confirm-discard') return { ok: true, go: await askFeedbackUnsaved('Open another recording anyway?', 'Open without saving') };

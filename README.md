@@ -330,12 +330,14 @@ GB there) and are removed when PostPilot starts again.
 
 **Nothing to install on Windows:** the Windows builds carry the engine frozen with
 Python, numpy, scipy, soundfile, matplotlib and FFmpeg (`resources\feedback-engine`,
-about 240 MB unpacked). `npm run dist:win` / `dist:zip` build it first with
+about 240 MB unpacked). The same exe runs **Quiet Lift** (`feedback-engine.exe quiet-lift`),
+so that page needs no Python either. `npm run dist:win` / `dist:zip` build it first with
 `scripts/build-feedback-engine.js` (PyInstaller, versions pinned in
 `scripts/feedback-engine-requirements.txt`), which needs **Python 3 on the build PC**
-only; it is rebuilt when `dsp.py`, the bridge or the package list change. From source,
-`npm run build-feedback-engine` once. The Mac build has no built-in engine: there the
-page uses `python3` with those packages. A Python path set on the page always wins over
+only; it is rebuilt when `dsp.py`, `quiet_lift.py`, the bridges or the package list change.
+From source, `npm run build-feedback-engine` once (and again after editing those files, or
+`npm start` keeps running the old engine). The Mac build has no built-in engine: there both
+pages use `python3` with those packages. A Python path set on either page always wins over
 the built-in engine. The VST3 effects chain of the standalone app is not included.
 Tests: `FEEDBACK_CUTTER_PYTHON=<python> npm test` (the built-in engine is tested when built).
 
