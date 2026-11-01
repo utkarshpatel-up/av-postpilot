@@ -643,6 +643,9 @@ local function chainimport(a)
   local r = connect()
   local _, p = project()
   if not p then return { ok = false, error = 'No project open in Resolve' } end
+  -- On the Project Manager there is no page, the project is a placeholder and bins can't be made
+  local page = r:GetCurrentPage()
+  if not page or page == '' then return { ok = false, error = 'Resolve is on the Project Manager, open a project and Render again' } end
   local mp = p:GetMediaPool()
   local folder = folderPath(mp, { a.bin })
   mp:SetCurrentFolder(folder)
