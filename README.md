@@ -5,7 +5,7 @@ backup server can be a Mac). It talks to Resolve through Resolve's own script ru
 (`fuscript.exe` + `electron/bridge.lua`), so the editing PCs need nothing extra
 installed: no Python.
 
-**Current version: 3.3.0** — downloads in `dist/`: Windows installer, Windows portable
+**Current version: 3.3.1** — downloads in `dist/`: Windows installer, Windows portable
 ZIP, macOS DMGs for Apple Silicon (arm64) and Intel (x64), plus SHA-256 checksums.
 
 ## New in 3.3
