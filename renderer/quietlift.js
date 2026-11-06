@@ -286,6 +286,11 @@ async function startEngine() {
     S.detected = await engine('editors');
     $('ql-engine-dot').className = 'dot ok';
     $('ql-engine').textContent = 'Engine ready';
+    if ((await pilot.quietLift('engine-outdated')).outdated) {
+      $('ql-engine-dot').className = 'dot warn';
+      $('ql-engine').textContent = 'Engine out of date';
+      toast('The built-in engine is out of date', 'It runs the code from its last build, so recent changes and new settings may not apply. Close the app and run: node scripts/build-feedback-engine.js', 'warn');
+    }
   } catch (e) {
     $('ql-engine-dot').className = 'dot err';
     $('ql-engine').textContent = 'Engine offline';
@@ -296,6 +301,12 @@ async function startEngine() {
 }
 
 // ---------- analyze ----------
+// What an analysis was run with, to tell afterwards whether it still matches the page.
+const analysisInputs = () => JSON.stringify([S.files.input, S.files.original, S.files.other,
+  Object.entries(options()).filter(([, v]) => v !== null && v !== undefined).sort()]);
+// Settings on the page that the running engine doesn't have: it would drop them without a word.
+const unknownSettings = (opts) => SETTINGS.flatMap((g) => g.items).filter(([k]) => opts[k] !== undefined && !(k in S.defaults)).map(([, label]) => label);
+
 async function analyze() {
   if (S.busy) return;
   if (!S.files.input) return toast('Pick the debleed track first', '', 'warn');
@@ -309,16 +320,20 @@ async function analyze() {
   for (const [k, v] of Object.entries(options())) if (v !== null && v !== undefined) opts[k] = v;
   if (options().floor === undefined && S.defaults.floor != null) opts.floor = S.defaults.floor;
   log(`— Analyze ${base(S.files.input)}`);
+  const sent = analysisInputs();
+  const unknown = unknownSettings(opts);
   try {
     const a = await engine('analyze', { input: S.files.input, original: S.files.original, other: S.files.other, options: opts });
     S.analysis = a;
     S.skipped = new Set(a.skipped);
     S.sel = a.stretches.length ? 0 : -1;
-    S.stale = false;
+    S.stale = analysisInputs() !== sent;   // changed while it ran: the list below is from the old values
     S.rendered = null;
     S.inputMarks = null;
     toast(`${a.stretches.length} quiet stretch${a.stretches.length === 1 ? '' : 'es'} found`,
       a.skipped.length ? `${a.skipped.length} skip(s) restored from last time.` : 'Double-click one to open it in your editor.', 'ok');
+    if (S.stale) toast('Settings changed during the analysis', 'These results use the old values. Re-analyze to apply the new ones.', 'warn');
+    if (unknown.length) toast('Settings not applied', `This engine doesn't have: ${unknown.join(', ')}. Rebuild it: node scripts/build-feedback-engine.js`, 'warn');
   } catch (e) {
     toast('Analysis failed', e.message, 'err');
     log(`ERROR: ${e.message}`);

@@ -7,10 +7,10 @@
 // Needs Python 3 on the build PC (FEEDBACK_ENGINE_PYTHON, else `py -3`, else `python`); the packages
 // come from scripts/feedback-engine-requirements.txt into vendor/feedback-engine/venv.
 // Runs before dist:win / dist:zip and does nothing when the engine is already built from these sources.
-const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { engineDigest } = require('../electron/feedbackcutter');
 
 const ROOT = path.join(__dirname, '..');
 const BASE = path.join(ROOT, 'vendor', 'feedback-engine');
@@ -21,9 +21,6 @@ const venv = path.join(BASE, 'venv');
 const venvPython = path.join(venv, 'Scripts', 'python.exe');
 const requirements = path.join(__dirname, 'feedback-engine-requirements.txt');
 const entry = path.join(__dirname, 'feedback-engine-main.py');
-const sources = [requirements, __filename, entry,
-  ...['dsp.py', 'feedback_bridge.py'].map((f) => path.join(ROOT, 'electron', 'feedbackcutter', f)),
-  ...['quiet_lift.py', 'quiet_lift_bridge.py', 'wav_markers.py'].map((f) => path.join(ROOT, 'electron', 'quietlift', f))];
 
 if (process.platform !== 'win32') {
   console.log('Audio engine: only built for Windows; elsewhere the pages use the Python on PATH');
@@ -31,9 +28,7 @@ if (process.platform !== 'win32') {
 }
 
 // rebuilt whenever the engine code, the package list or this script changes
-const hash = crypto.createHash('sha256');
-for (const f of sources) hash.update(fs.readFileSync(f));
-const digest = hash.digest('hex');
+const digest = engineDigest(ROOT);
 if (!process.argv.includes('--force') && fs.existsSync(exe) && fs.existsSync(stamp) && fs.readFileSync(stamp, 'utf8').trim() === digest) {
   console.log(`Audio engine is already in ${path.relative(ROOT, dest)}`);
   process.exit(0);

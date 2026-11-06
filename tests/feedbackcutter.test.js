@@ -65,6 +65,24 @@ test('a Python set on the page is used instead of the built-in engine', () => {
   assert.strictEqual(builtin.getExe(), 'C:\\x\\feedback-engine.exe');
 });
 
+test('the built engine counts as out of date once a source file changes', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'engine-'));
+  const files = ['scripts/feedback-engine-requirements.txt', 'scripts/build-feedback-engine.js', 'scripts/feedback-engine-main.py',
+    'electron/feedbackcutter/dsp.py', 'electron/feedbackcutter/feedback_bridge.py',
+    'electron/quietlift/quiet_lift.py', 'electron/quietlift/quiet_lift_bridge.py', 'electron/quietlift/wav_markers.py'];
+  for (const f of files) {
+    fs.mkdirSync(path.dirname(path.join(root, f)), { recursive: true });
+    fs.writeFileSync(path.join(root, f), f);
+  }
+  assert.strictEqual(fc.builtEngineOutdated(root), false);   // never built: nothing to go out of date
+  const stamp = path.join(root, 'vendor', 'feedback-engine', 'win', 'SOURCES');
+  fs.mkdirSync(path.dirname(stamp), { recursive: true });
+  fs.writeFileSync(stamp, `${fc.engineDigest(root)}\n`);
+  assert.strictEqual(fc.builtEngineOutdated(root), false);
+  fs.appendFileSync(path.join(root, 'electron/quietlift/quiet_lift.py'), '# edited');
+  assert.strictEqual(fc.builtEngineOutdated(root), true);
+});
+
 const BUILTIN = fc.bundledEngine();
 test('the built-in engine runs without Python', { skip: !BUILTIN && 'not built (npm run build-feedback-engine)', timeout: 180000 }, async () => {
   const dir = tmp();

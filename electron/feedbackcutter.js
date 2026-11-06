@@ -1,6 +1,7 @@
 // Feedback Cutter: finds feedback rings in a speech recording and notches them out.
 // The DSP is the Feedback Cutter project's dsp.py, run through a JSON-lines bridge
 // (feedbackcutter/feedback_bridge.py) by the same engine class Quiet Lift uses.
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { QuietLift: Engine } = require('./quietlift');
@@ -42,9 +43,28 @@ function bundledEngine(resourcesPath = process.resourcesPath) {
   return '';
 }
 
+// Hash of everything the built engine is made from; scripts/build-feedback-engine.js stamps it on a build.
+function engineDigest(root) {
+  const hash = crypto.createHash('sha256');
+  for (const f of ['scripts/feedback-engine-requirements.txt', 'scripts/build-feedback-engine.js', 'scripts/feedback-engine-main.py',
+    'electron/feedbackcutter/dsp.py', 'electron/feedbackcutter/feedback_bridge.py',
+    'electron/quietlift/quiet_lift.py', 'electron/quietlift/quiet_lift_bridge.py', 'electron/quietlift/wav_markers.py']) {
+    hash.update(fs.readFileSync(path.join(root, f)));
+  }
+  return hash.digest('hex');
+}
+
+// From source only: the built engine holds its own copy of the code, so after an edit it runs the old
+// version until it is rebuilt. Installed apps have no sources here, and their engine is built with them.
+function builtEngineOutdated(root = path.join(__dirname, '..')) {
+  const stamp = path.join(root, 'vendor', 'feedback-engine', 'win', 'SOURCES');
+  if (!fs.existsSync(stamp)) return false;
+  return fs.readFileSync(stamp, 'utf8').trim() !== engineDigest(root);
+}
+
 // A Python chosen on the page wins (e.g. to try a newer dsp.py); otherwise the built-in engine.
 function createEngine({ script, workDir, getPython = () => '', getExe = bundledEngine, onLog }) {
   return new Engine({ script, args: [workDir], name: 'Feedback Cutter', getPython, getExe: () => (getPython() ? '' : getExe()), onLog });
 }
 
-module.exports = { DEFAULTS, installScripts, jobFile, exportName, createEngine, bundledEngine };
+module.exports = { DEFAULTS, installScripts, jobFile, exportName, createEngine, bundledEngine, engineDigest, builtEngineOutdated };
