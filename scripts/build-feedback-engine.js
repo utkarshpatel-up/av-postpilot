@@ -39,6 +39,11 @@ if (!process.argv.includes('--force') && fs.existsSync(exe) && fs.existsSync(sta
 }
 
 const run = (cmd, args) => execFileSync(cmd, args, { stdio: 'inherit', cwd: ROOT });
+// A universal Python runs as the computer's own architecture unless told otherwise. What it starts
+// (PyInstaller's helpers) stays on the same one under Rosetta.
+const macArch = arch === 'x64' ? 'x86_64' : arch;
+const onArch = (cmd, args) => (WIN ? [cmd, args] : ['arch', [`-${macArch}`, cmd, ...args]]);
+const runPython = (args) => run(...onArch(venvPython, args));
 function basePython() {
   const tries = process.env.FEEDBACK_ENGINE_PYTHON ? [[process.env.FEEDBACK_ENGINE_PYTHON]] : [['py', '-3'], ['python3'], ['python']];
   for (const [cmd, ...pre] of tries) {
@@ -50,17 +55,17 @@ function basePython() {
 if (!fs.existsSync(venvPython)) {
   const [cmd, pre] = basePython();
   console.log(`Creating ${path.relative(ROOT, venv)}`);
-  run(cmd, [...pre, '-m', 'venv', venv]);
+  run(...onArch(cmd, [...pre, '-m', 'venv', venv]));
 }
 if (!WIN) {   // PyInstaller builds for the Python running it: a wrong one must not pass for this architecture
-  const machine = execFileSync(venvPython, ['-c', 'import platform; print(platform.machine())'], { encoding: 'utf8' }).trim();
-  if (machine !== (arch === 'x64' ? 'x86_64' : arch)) throw new Error(`Building for ${arch} needs a Python of that architecture, but ${venvPython} is ${machine} (set FEEDBACK_ENGINE_PYTHON)`);
+  const machine = execFileSync(...onArch(venvPython, ['-c', 'import platform; print(platform.machine())']), { encoding: 'utf8' }).trim();
+  if (machine !== macArch) throw new Error(`Building for ${arch} needs a Python of that architecture, but ${venvPython} is ${machine} (set FEEDBACK_ENGINE_PYTHON)`);
 }
-run(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '-q', '-r', requirements]);
+runPython(['-m', 'pip', 'install', '--disable-pip-version-check', '-q', '-r', requirements]);
 
 const work = path.join(BASE, WIN ? 'pyinstaller' : `pyinstaller-${path.basename(dest)}`);
 fs.rmSync(dest, { recursive: true, force: true });
-run(venvPython, ['-m', 'PyInstaller', '--noconfirm', '--clean', '--onedir', '--log-level', 'WARN',
+runPython(['-m', 'PyInstaller', '--noconfirm', '--clean', '--onedir', '--log-level', 'WARN',
   '--name', 'feedback-engine', '--distpath', dest, '--workpath', work, '--specpath', work,
   '--paths', path.join(ROOT, 'electron', 'feedbackcutter'), '--paths', path.join(ROOT, 'electron', 'quietlift'),
   '--collect-all', 'imageio_ffmpeg',   // its FFmpeg: MP3 previews and non-WAV recordings

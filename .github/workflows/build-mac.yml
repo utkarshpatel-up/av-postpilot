@@ -37,6 +37,8 @@ jobs:
           python-version: '3.14'
           architecture: x64
       - run: npm ci
+      - name: Make sure Rosetta is installed
+        run: softwareupdate --install-rosetta --agree-to-license
       - name: Build the audio engine (arm64)
         run: node scripts/build-feedback-engine.js --arch arm64
         env:
