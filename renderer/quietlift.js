@@ -12,18 +12,19 @@ const ROLES = [
 const SETTINGS = [
   { group: 'Detection', items: [
     ['min_len', 'Minimum length', 's', 'A stretch must stay quiet at least this long.'],
-    ['quiet_high', 'Quiet starts at', 'dB', 'How far below typical speech counts as quiet.'],
+    ['quiet_high', 'Quiet starts at', 'dB', 'How far below typical speech counts as quiet. Not used when Target level is set.'],
     ['quiet_low', 'Quiet ends at', 'dB', 'Below this it is treated as bleed, not quiet speech.'],
     ['contrast', 'Word contrast', 'dB', 'Real speech must sit this far above its own gaps.'],
     ['window', 'Judging window', 's', 'Seconds used to judge a stretch’s level.'],
     ['floor', 'Hard floor', 'dB', 'Never raise anything quieter than this. Blank = off.'],
   ] },
   { group: 'Lift', items: [
+    ['target', 'Target level', 'dB', 'Raise speech below this level up to it, instead of up to typical speech. Blank = off.'],
     ['max_gain', 'Maximum lift', 'dB', 'Never raise a stretch more than this.'],
     ['gate', 'Word gate', 'dB', 'Words = within this many dB of the stretch’s speech level.'],
     ['word_floor', 'Word floor', 'dB', 'Words must also be this far above the stretch’s gaps, so debleed residue isn’t raised.'],
-    ['ceiling', 'Peak ceiling', 'dBFS', 'Raised peaks stay below this.'],
-    ['release', 'Limiter release', 'ms', 'Release time of the limiter on raised words.'],
+    ['ceiling', 'Peak ceiling', 'dBFS', 'Limits raised peaks to this, which flattens them. Blank = off: peaks keep their shape.'],
+    ['release', 'Limiter release', 'ms', 'Release time of the limiter on raised words. Only used with a Peak ceiling.'],
   ] },
   { group: 'Speakers', items: [
     ['removed', 'Debleed threshold', 'dB', 'If debleed removed more than this, the moment is bleed.'],
@@ -285,6 +286,11 @@ async function startEngine() {
     S.detected = await engine('editors');
     $('ql-engine-dot').className = 'dot ok';
     $('ql-engine').textContent = 'Engine ready';
+    if ((await pilot.quietLift('engine-outdated')).outdated) {
+      $('ql-engine-dot').className = 'dot warn';
+      $('ql-engine').textContent = 'Engine out of date';
+      toast('The built-in engine is out of date', 'It runs the code from its last build, so recent changes and new settings may not apply. Close the app and run: node scripts/build-feedback-engine.js', 'warn');
+    }
   } catch (e) {
     $('ql-engine-dot').className = 'dot err';
     $('ql-engine').textContent = 'Engine offline';
@@ -295,6 +301,12 @@ async function startEngine() {
 }
 
 // ---------- analyze ----------
+// What an analysis was run with, to tell afterwards whether it still matches the page.
+const analysisInputs = () => JSON.stringify([S.files.input, S.files.original, S.files.other,
+  Object.entries(options()).filter(([, v]) => v !== null && v !== undefined).sort()]);
+// Settings on the page that the running engine doesn't have: it would drop them without a word.
+const unknownSettings = (opts) => SETTINGS.flatMap((g) => g.items).filter(([k]) => opts[k] !== undefined && !(k in S.defaults)).map(([, label]) => label);
+
 async function analyze() {
   if (S.busy) return;
   if (!S.files.input) return toast('Pick the debleed track first', '', 'warn');
@@ -308,16 +320,20 @@ async function analyze() {
   for (const [k, v] of Object.entries(options())) if (v !== null && v !== undefined) opts[k] = v;
   if (options().floor === undefined && S.defaults.floor != null) opts.floor = S.defaults.floor;
   log(`— Analyze ${base(S.files.input)}`);
+  const sent = analysisInputs();
+  const unknown = unknownSettings(opts);
   try {
     const a = await engine('analyze', { input: S.files.input, original: S.files.original, other: S.files.other, options: opts });
     S.analysis = a;
     S.skipped = new Set(a.skipped);
     S.sel = a.stretches.length ? 0 : -1;
-    S.stale = false;
+    S.stale = analysisInputs() !== sent;   // changed while it ran: the list below is from the old values
     S.rendered = null;
     S.inputMarks = null;
     toast(`${a.stretches.length} quiet stretch${a.stretches.length === 1 ? '' : 'es'} found`,
       a.skipped.length ? `${a.skipped.length} skip(s) restored from last time.` : 'Double-click one to open it in your editor.', 'ok');
+    if (S.stale) toast('Settings changed during the analysis', 'These results use the old values. Re-analyze to apply the new ones.', 'warn');
+    if (unknown.length) toast('Settings not applied', `This engine doesn't have: ${unknown.join(', ')}. Rebuild it: node scripts/build-feedback-engine.js`, 'warn');
   } catch (e) {
     toast('Analysis failed', e.message, 'err');
     log(`ERROR: ${e.message}`);
@@ -487,7 +503,7 @@ function tlGeom() {
   const H = cv.clientHeight;
   const sorted = a.levels.filter((v) => v > -150).sort((x, y) => x - y);
   const p99 = sorted.length ? sorted[Math.floor(sorted.length * 0.995)] : a.ref;
-  const yMax = Math.max(a.ref + 6, p99 + 2);
+  const yMax = Math.max(a.ref + 6, p99 + 2, a.hi + 2);
   const yMin = a.lo - 8;
   const x = (t) => (t / a.duration) * W;
   const y = (db) => TL.pad.t + (1 - (Math.min(Math.max(db, yMin), yMax) - yMin) / (yMax - yMin)) * (H - TL.pad.t - TL.pad.b);

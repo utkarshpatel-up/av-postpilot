@@ -1002,6 +1002,7 @@ ipcMain.handle('quietlift', async (_e, { action, args = {} }) => {
   try {
     if (action === 'call') return { ok: true, data: await quietLift.call(args.cmd, args.payload) };
     if (action === 'restart') { quietLift.stop(); return { ok: true }; }
+    if (action === 'engine-outdated') return { ok: true, outdated: !app.isPackaged && !quietLiftPython() && !!feedbackCutter.bundledEngine() && feedbackCutter.builtEngineOutdated() };
     // after Render: into Resolve (bin, timeline, Fairlight page)
     if (action === 'to-resolve') {
       const r = await toResolve.sendToResolve({

@@ -14,14 +14,14 @@ test('the lifted file goes to Resolve with the bin and timeline settings', async
   const f = fake((a) => ({ ok: true, timeline: a.name, bin: a.bin, clip: 'Talk-02-lifted.wav' }));
   const file = 'D:\\Talks\\Talk-02-lifted.wav';
   const r = await sendToResolve({ file, name: 'Talk-02', chainImport: f.chainImport, opts: DEFAULTS });
-  assert.deepStrictEqual(f.calls, [{ file, bin: 'Audio Chain', timeline: 'new', name: 'Talk-02', channel: null, edit: null, clipNo: null, normalize: -6.3, isolation: 20 }]);
+  assert.deepStrictEqual(f.calls, [{ file, bin: 'Audio Chain', timeline: 'new', name: 'Talk-02', channel: null, edit: null, clipNo: null, normalize: null, isolation: 20 }]);
   assert.deepStrictEqual(r, { file, timeline: 'Talk-02', bin: 'Audio Chain', track: null, normalized: null, isolationTrack: null, warning: null });
 });
 
 test('a blank bin uses the default, and no recording name uses the file\'s own', async () => {
   const f = fake(() => ({ ok: true, timeline: 't', bin: 'b' }));
   await sendToResolve({ file: '/x/a-lifted.wav', chainImport: f.chainImport, opts: { ...DEFAULTS, bin: '', timeline: 'current' } });
-  assert.deepStrictEqual(f.calls[0], { file: '/x/a-lifted.wav', bin: 'Audio Chain', timeline: 'current', name: 'a-lifted', channel: null, edit: null, clipNo: null, normalize: -6.3, isolation: 20 });
+  assert.deepStrictEqual(f.calls[0], { file: '/x/a-lifted.wav', bin: 'Audio Chain', timeline: 'current', name: 'a-lifted', channel: null, edit: null, clipNo: null, normalize: null, isolation: 20 });
 });
 
 test('Voice Isolation: off when blank, a whole number kept to 0-100; the track and a warning come back', async () => {

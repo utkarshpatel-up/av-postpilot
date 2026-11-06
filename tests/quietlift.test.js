@@ -52,6 +52,91 @@ test('an engine that dies before it is ready fails the call with its last error 
   await assert.rejects(ql.call('defaults'), /stopped \(code 1\)\. ModuleNotFoundError: No module named 'numpy'/);
 });
 
+test('a target level lifts speech that is not quiet for the file', { skip: !hasEngine && 'Python with numpy + soundfile not found' }, async () => {
+  const dir = tmp();
+  const input = path.join(dir, 'take-1-debleed.wav');
+  speechWav(input);
+  const ql = new QuietLift({ script: installScripts(path.join(dir, 'engine')), getPython: () => PYTHON });
+  try {
+    const defaults = await ql.call('defaults');
+    assert.strictEqual(defaults.target, null);
+    const options = { min_len: 5, max_gain: 30 };
+
+    // Without a target the 0.3 level is the file's typical speech, so it is left alone.
+    const plain = await ql.call('analyze', { input, options });
+    assert.ok(plain.stretches.every((st) => st.start >= 15 && st.end <= 45), JSON.stringify(plain.stretches));
+    const [before] = plain.stretches;
+
+    // A target above it: the louder speech now counts too, and every lift reaches 5 dB higher.
+    const a = await ql.call('analyze', { input, options: { ...options, target: plain.ref + 5 } });
+    assert.strictEqual(a.hi, plain.ref + 5);
+    assert.strictEqual(a.lo, plain.lo);   // the bleed limit stays measured from typical speech
+    assert.ok(a.stretches.some((st) => st.start < 15 || st.end > 45), JSON.stringify(a.stretches));
+    const after = a.stretches.find((st) => st.start <= 30 && st.end >= 30);
+    assert.ok(Math.abs(after.gain - (before.gain + 5)) < 1, JSON.stringify({ before, after }));
+
+    // A target below the bleed limit raises nothing.
+    const none = await ql.call('analyze', { input, options: { ...options, target: plain.lo - 1 } });
+    assert.strictEqual(none.stretches.length, 0);
+  } finally {
+    ql.stop();
+  }
+});
+
+test('no peak ceiling by default: raised peaks keep their shape, and a ceiling flattens them', { skip: !hasEngine && 'Python with numpy + soundfile not found' }, async () => {
+  const dir = tmp();
+  const input = path.join(dir, 'take-1-debleed.wav');
+  speechWav(input);
+  const ql = new QuietLift({ script: installScripts(path.join(dir, 'engine')), getPython: () => PYTHON });
+  // samples at full scale of the quiet stretch: the loudest one, and how many sit within 1 LSB of it
+  const atTop = (file) => {
+    const data = fs.readFileSync(file);
+    let top = 0;
+    const vals = [];
+    for (let i = 44 + 25 * 16000 * 2; i < 44 + 35 * 16000 * 2; i += 2) { const v = Math.abs(data.readInt16LE(i)); vals.push(v); if (v > top) top = v; }
+    return { top, count: vals.filter((v) => v >= top - 1).length };
+  };
+  try {
+    const defaults = await ql.call('defaults');
+    assert.strictEqual(defaults.ceiling, null);
+
+    const free = path.join(dir, 'free.wav');
+    const a = await ql.call('analyze', { input, options: { min_len: 5 } });
+    const gain = a.stretches[0].gain;
+    await ql.call('render', { output: free, skipped: [], mark_input: false });
+    const src = atTop(input), out = atTop(free);
+    const ratio = out.top / src.top;
+    assert.ok(Math.abs(20 * Math.log10(ratio) - gain) < 1, `${ratio} vs +${gain} dB`);
+
+    const limited = path.join(dir, 'limited.wav');
+    const ceiling = 20 * Math.log10((src.top * 1.3) / 32768);
+    await ql.call('analyze', { input, options: { min_len: 5, ceiling } });
+    await ql.call('render', { output: limited, skipped: [], mark_input: false });
+    assert.ok(atTop(limited).count > out.count * 5, JSON.stringify({ limited: atTop(limited), free: out }));   // only the ceiling piles samples up at the top
+  } finally {
+    ql.stop();
+  }
+});
+
+test('a fixed-point file gets a smaller lift rather than clipping', { skip: !hasEngine && 'Python with numpy + soundfile not found' }, async () => {
+  const dir = tmp();
+  const input = path.join(dir, 'take-1-debleed.wav');
+  speechWav(input);
+  const ql = new QuietLift({ script: installScripts(path.join(dir, 'engine')), getPython: () => PYTHON });
+  try {
+    const output = path.join(dir, 'out.wav');
+    await ql.call('analyze', { input, options: { min_len: 5, target: 20, max_gain: 40 } });
+    await ql.call('render', { output, skipped: [], mark_input: false });
+    const data = fs.readFileSync(output);
+    let full = 0, top = 0;
+    for (let i = 44; i + 1 < 44 + 60 * 16000 * 2; i += 2) { const v = Math.abs(data.readInt16LE(i)); if (v >= 32767) full++; if (v > top) top = v; }
+    assert.strictEqual(full, 0);
+    assert.ok(top > 25000, `loudest sample ${top}`);
+  } finally {
+    ql.stop();
+  }
+});
+
 test('analyze, skip and render through the real engine', { skip: !hasEngine && 'Python with numpy + soundfile not found' }, async () => {
   const dir = tmp();
   const input = path.join(dir, 'take-1-debleed.wav');

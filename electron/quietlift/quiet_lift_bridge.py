@@ -37,7 +37,7 @@ EDITORS = {
 }
 MARKER_PREFIX = "QL"
 OPTION_KEYS = ["window", "quiet_low", "quiet_high", "floor", "contrast", "removed",
-               "min_len", "max_gain", "gate", "word_floor", "ceiling", "release"]
+               "min_len", "target", "max_gain", "gate", "word_floor", "ceiling", "release"]
 
 state = {"analysis": None}
 
@@ -91,7 +91,7 @@ def cmd_analyze(req, log):
     log(f"Found {len(a.stretches)} quiet stretch(es)" + (f", {len(skipped)} skip(s) restored." if skipped else "."))
     return {
         "duration": a.info.duration,
-        "ref": a.ref, "lo": a.ref - args.quiet_low, "hi": a.ref - args.quiet_high,
+        "ref": a.ref, "lo": a.ref - args.quiet_low, "hi": a.ref - args.quiet_high if args.target is None else args.target,
         "step": 0.5,
         "levels": [round(float(x), 1) for x in a.sec],
         "stretches": [{"start": st.start, "end": st.end, "speech": round(st.speech, 1),
