@@ -9,6 +9,8 @@ on:
       - 'renderer/**'
       - 'resolve-db-backup/**'
       - 'scripts/verify-mac-package.js'
+      - 'scripts/build-feedback-engine.js'
+      - 'scripts/feedback-engine-*'
       - 'package*.json'
       - '.github/workflows/build-mac.yml'
 jobs:
@@ -22,7 +24,27 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # The built-in audio engine, once per architecture: a frozen Python runs on its own only.
+      # The x64 Python runs under Rosetta on this Apple silicon runner.
+      - uses: actions/setup-python@v5
+        id: python-arm64
+        with:
+          python-version: '3.14'
+          architecture: arm64
+      - uses: actions/setup-python@v5
+        id: python-x64
+        with:
+          python-version: '3.14'
+          architecture: x64
       - run: npm ci
+      - name: Build the audio engine (arm64)
+        run: node scripts/build-feedback-engine.js --arch arm64
+        env:
+          FEEDBACK_ENGINE_PYTHON: ${{ steps.python-arm64.outputs.python-path }}
+      - name: Build the audio engine (x64)
+        run: node scripts/build-feedback-engine.js --arch x64
+        env:
+          FEEDBACK_ENGINE_PYTHON: ${{ steps.python-x64.outputs.python-path }}
       - run: npm test
       - run: npm run dist:mac
         env:

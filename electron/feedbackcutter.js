@@ -31,13 +31,21 @@ function jobFile(workDir, job, name) {
 // (split on both separators: path.basename on a Mac keeps a whole Windows path)
 const exportName = (source, suffix, ext) => `${source.split(/[\\/]/).pop().replace(/\.[^.]+$/, '')} (fc-${suffix}).${ext}`;
 
+// Where a build of the engine lives from source: vendor/feedback-engine/win, or mac-arm64 / mac-x64
+// (a frozen Python runs on one architecture only). '' where it isn't built.
+function engineDir(root, platform = process.platform, arch = process.arch) {
+  const name = platform === 'win32' ? 'win' : platform === 'darwin' ? `mac-${arch}` : '';
+  return name && path.join(root, 'vendor', 'feedback-engine', name);
+}
+const engineExeName = (platform = process.platform) => (platform === 'win32' ? 'feedback-engine.exe' : 'feedback-engine');
+
 // The engine built into the app (scripts/build-feedback-engine.js): resources/feedback-engine when
-// installed, vendor/feedback-engine/<win> from source. '' when there is none (Mac, or not built).
+// installed, vendor/feedback-engine/<win, mac-arch> from source. '' when there is none (not built).
 function bundledEngine(resourcesPath = process.resourcesPath) {
-  if (process.platform !== 'win32') return '';
-  const dirs = [resourcesPath && path.join(resourcesPath, 'feedback-engine'), path.join(__dirname, '..', 'vendor', 'feedback-engine', 'win')];
+  const dirs = [resourcesPath && path.join(resourcesPath, 'feedback-engine'), engineDir(path.join(__dirname, '..'))];
+  if (!dirs[1]) return '';
   for (const d of dirs.filter(Boolean)) {
-    const exe = path.join(d, 'feedback-engine', 'feedback-engine.exe');
+    const exe = path.join(d, 'feedback-engine', engineExeName());
     if (fs.existsSync(exe)) return exe;
   }
   return '';
@@ -57,8 +65,9 @@ function engineDigest(root) {
 // From source only: the built engine holds its own copy of the code, so after an edit it runs the old
 // version until it is rebuilt. Installed apps have no sources here, and their engine is built with them.
 function builtEngineOutdated(root = path.join(__dirname, '..')) {
-  const stamp = path.join(root, 'vendor', 'feedback-engine', 'win', 'SOURCES');
-  if (!fs.existsSync(stamp)) return false;
+  const dir = engineDir(root);
+  const stamp = dir && path.join(dir, 'SOURCES');
+  if (!stamp || !fs.existsSync(stamp)) return false;
   return fs.readFileSync(stamp, 'utf8').trim() !== engineDigest(root);
 }
 
@@ -67,4 +76,4 @@ function createEngine({ script, workDir, getPython = () => '', getExe = bundledE
   return new Engine({ script, args: [workDir], name: 'Feedback Cutter', getPython, getExe: () => (getPython() ? '' : getExe()), onLog });
 }
 
-module.exports = { DEFAULTS, installScripts, jobFile, exportName, createEngine, bundledEngine, engineDigest, builtEngineOutdated };
+module.exports = { DEFAULTS, installScripts, jobFile, exportName, createEngine, bundledEngine, engineDir, engineExeName, engineDigest, builtEngineOutdated };

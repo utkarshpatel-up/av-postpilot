@@ -56,7 +56,13 @@
       "category": "public.app-category.productivity",
       "identity": "-",
       "hardenedRuntime": false,
-      "artifactName": "AV-PostPilot-${version}-macOS-${arch}.${ext}"
+      "artifactName": "AV-PostPilot-${version}-macOS-${arch}.${ext}",
+      "extraResources": [
+        {
+          "from": "vendor/feedback-engine/mac-${arch}/feedback-engine",
+          "to": "feedback-engine/feedback-engine"
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,
