@@ -6,7 +6,7 @@
 const path = require('path');
 const { timelineFor } = require('./project-audio');
 
-const DEFAULTS = { enabled: true, bin: 'Audio Chain', timeline: 'new', normalize: -6.3, isolation: 20 };
+const DEFAULTS = { enabled: true, bin: 'Audio Chain', timeline: 'new', normalize: null, isolation: 20 };
 
 const stemOf = (file) => file.split(/[\\/]/).pop().replace(/\.[^.]+$/, '');
 

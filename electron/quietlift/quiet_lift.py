@@ -13,11 +13,14 @@ How it decides:
      It must also look like real talking: words at least --contrast dB (default 15)
      above the gaps between them. Debleed residue with a stray word is rejected.
      --floor -33 (optional) rejects anything quieter than that outright.
+     --target -18 (optional) replaces the first number and the lift's aim: any stretch
+     below -18 dB counts as quiet and is raised to -18 dB. The bleed limit (--quiet-low)
+     stays measured from the file's typical speech level.
   4. Inside a quiet stretch, gain is applied ONLY while someone is talking (the 50 ms
      level is near the speech level AND at least --word-floor dB, default 12, above the
      stretch's gaps). Gaps / debleed residue stay at their original level.
      Everything outside quiet stretches is passed through bit-for-bit.
-  5. A limiter (--ceiling, default -6.3 dBFS) works only on the raised words.
+  5. Off by default, so peaks keep their shape: --ceiling -6.3 adds a limiter on the raised words.
 
 Usage:
   python quiet_lift.py input.wav --analyze        # report only, changes nothing
@@ -105,11 +108,13 @@ def make_parser():
     ap.add_argument("--other", metavar="OTHER_MIC.wav",
                     help="the OTHER person's mic (same take). Moments where they are the one talking are never raised")
     ap.add_argument("--min-len", type=float, default=8.0, help="quiet stretch must last this long (s)")
+    ap.add_argument("--target", type=float, default=None,
+                    help="raise speech below this level up to it (dB), instead of up to the file's typical level")
     ap.add_argument("--max-gain", type=float, default=12.0, help="never raise more than this (dB)")
     ap.add_argument("--gate", type=float, default=15.0, help="words = within this many dB of the stretch's speech level")
     ap.add_argument("--word-floor", type=float, default=12.0,
                     help="words must also be this many dB above the stretch's gaps, so debleed residue isn't raised")
-    ap.add_argument("--ceiling", type=float, default=-6.3, help="raised peaks stay below this (dBFS)")
+    ap.add_argument("--ceiling", type=float, default=None, help="limit raised peaks to this (dBFS); default off")
     ap.add_argument("--release", type=float, default=80.0, help="limiter release on raised words (ms)")
     return ap
 
@@ -211,12 +216,16 @@ def analyze(args, log=print):
 
     active = sec > np.percentile(sec, 95) - 30
     ref = float(np.median(sec[active]))
-    lo, hi = ref - args.quiet_low, ref - args.quiet_high
+    aim = ref if args.target is None else args.target  # the level a raised stretch is brought up to
+    lo, hi = ref - args.quiet_low, ref - args.quiet_high if args.target is None else args.target
     if args.original:
         loud = L > ref - 10
         log(f"Main speaker = {100 * own.mean():.0f}% of the file, debleed/bleed = {100 * (1 - own.mean()):.0f}%"
             f"  (on normal speech debleed removed {np.median(removed[loud & own]):.1f} dB on average - should be near 0)")
-    log(f"Typical speech level: {ref:.1f} dB -> quiet = {lo:.1f} .. {hi:.1f} dB for >= {args.min_len:g} s")
+    log(f"Typical speech level: {ref:.1f} dB -> quiet = {lo:.1f} .. {hi:.1f} dB for >= {args.min_len:g} s"
+        + (f", raised to {aim:.1f} dB" if args.target is not None else ""))
+    if hi <= lo:
+        log(f"Target level {hi:.1f} dB is below the bleed limit ({lo:.1f} dB), so nothing can be raised.")
 
     # real talking = words well above the gaps between them; debleed residue
     # (with maybe a stray word) is flat, so its contrast is small
@@ -237,7 +246,7 @@ def analyze(args, log=print):
         if e - s >= int(args.min_len * 2):
             keep[s:e] = True
 
-    g_sec = np.where(keep, np.clip(ref - sec, 0, args.max_gain), 0.0)
+    g_sec = np.where(keep, np.clip(aim - sec, 0, args.max_gain), 0.0)
     g_sec = np.where(keep, moving_avg(g_sec, 9), 0.0)
 
     stretches = [Stretch(int(s), int(e), float(np.median(sec[s:e])), float(np.median(floor_lvl[s:e])),
@@ -268,6 +277,8 @@ def gain_curve(a, skipped=()):
     gain = gain * gate * in_stretch
 
     peak_db = 20 * np.log10(np.maximum(a.peak, 1e-10))
+    if args.ceiling is None:
+        return unclipped_gain(a, gain, peak_db)
     red = np.minimum(0.0, args.ceiling - (moving_max(peak_db, 3) + gain))
     red = -moving_max(-red, 3)
     rel = np.exp(-HOP_MS / max(args.release, 1.0))
@@ -281,13 +292,27 @@ def gain_curve(a, skipped=()):
     return gain
 
 
+def unclipped_gain(a, gain, peak_db):
+    """No limiter: every word in a stretch gets the same treatment, so no peak changes shape.
+    Float files can hold peaks over 0 dBFS. Fixed-point files can't, and would clip when written,
+    so there a stretch whose loudest raised peak would pass 0 dBFS gets a smaller lift as a whole."""
+    gain = np.where(gain < 0.05, 0.0, gain)
+    if a.info.subtype.startswith(("FLOAT", "DOUBLE")):
+        return gain
+    for s, e in runs(gain > 0):
+        room = -0.1 - peak_db[s:e]
+        gain[s:e] *= np.clip(np.min(room / gain[s:e]), 0.0, 1.0)
+    gain[gain < 0.05] = 0.0
+    return gain
+
+
 def render(a, output, gain, start=None, end=None, apply_gain=True):
     """Write the input with `gain` applied. start / end (seconds) write just that part (for previews)."""
     sr, hop, info = a.sr, a.hop, a.info
     first = 0 if start is None else max(0, int(start * sr))
     last = info.frames if end is None else min(info.frames, int(end * sr))
     centers = (np.arange(len(gain)) + 0.5) * hop
-    ceil_lin = 10 ** (a.args.ceiling / 20)
+    ceil_lin = None if a.args.ceiling is None else 10 ** (a.args.ceiling / 20)
     pos = first
     with sf.SoundFile(output, "w", samplerate=sr, channels=info.channels,
                       subtype=info.subtype, format=info.format) as out:
@@ -299,9 +324,10 @@ def render(a, output, gain, start=None, end=None, apply_gain=True):
             on = g > 0
             if apply_gain and on.any():
                 y[on] = b[on] * (10 ** (g[on] / 20)).astype(np.float32)[:, None]
-                lim = np.maximum(ceil_lin, np.abs(b))  # never push a sample past the ceiling (or past itself if already over)
-                over = on[:, None] & (np.abs(y) > lim)
-                y[over] = np.sign(y[over]) * lim[over]
+                if ceil_lin is not None:
+                    lim = np.maximum(ceil_lin, np.abs(b))  # never push a sample past the ceiling (or past itself if already over)
+                    over = on[:, None] & (np.abs(y) > lim)
+                    y[over] = np.sign(y[over]) * lim[over]
             out.write(y)
             pos += m
 

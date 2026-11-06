@@ -12,18 +12,19 @@ const ROLES = [
 const SETTINGS = [
   { group: 'Detection', items: [
     ['min_len', 'Minimum length', 's', 'A stretch must stay quiet at least this long.'],
-    ['quiet_high', 'Quiet starts at', 'dB', 'How far below typical speech counts as quiet.'],
+    ['quiet_high', 'Quiet starts at', 'dB', 'How far below typical speech counts as quiet. Not used when Target level is set.'],
     ['quiet_low', 'Quiet ends at', 'dB', 'Below this it is treated as bleed, not quiet speech.'],
     ['contrast', 'Word contrast', 'dB', 'Real speech must sit this far above its own gaps.'],
     ['window', 'Judging window', 's', 'Seconds used to judge a stretch’s level.'],
     ['floor', 'Hard floor', 'dB', 'Never raise anything quieter than this. Blank = off.'],
   ] },
   { group: 'Lift', items: [
+    ['target', 'Target level', 'dB', 'Raise speech below this level up to it, instead of up to typical speech. Blank = off.'],
     ['max_gain', 'Maximum lift', 'dB', 'Never raise a stretch more than this.'],
     ['gate', 'Word gate', 'dB', 'Words = within this many dB of the stretch’s speech level.'],
     ['word_floor', 'Word floor', 'dB', 'Words must also be this far above the stretch’s gaps, so debleed residue isn’t raised.'],
-    ['ceiling', 'Peak ceiling', 'dBFS', 'Raised peaks stay below this.'],
-    ['release', 'Limiter release', 'ms', 'Release time of the limiter on raised words.'],
+    ['ceiling', 'Peak ceiling', 'dBFS', 'Limits raised peaks to this, which flattens them. Blank = off: peaks keep their shape.'],
+    ['release', 'Limiter release', 'ms', 'Release time of the limiter on raised words. Only used with a Peak ceiling.'],
   ] },
   { group: 'Speakers', items: [
     ['removed', 'Debleed threshold', 'dB', 'If debleed removed more than this, the moment is bleed.'],
@@ -487,7 +488,7 @@ function tlGeom() {
   const H = cv.clientHeight;
   const sorted = a.levels.filter((v) => v > -150).sort((x, y) => x - y);
   const p99 = sorted.length ? sorted[Math.floor(sorted.length * 0.995)] : a.ref;
-  const yMax = Math.max(a.ref + 6, p99 + 2);
+  const yMax = Math.max(a.ref + 6, p99 + 2, a.hi + 2);
   const yMin = a.lo - 8;
   const x = (t) => (t / a.duration) * W;
   const y = (db) => TL.pad.t + (1 - (Math.min(Math.max(db, yMin), yMax) - yMin) / (yMax - yMin)) * (H - TL.pad.t - TL.pad.b);
