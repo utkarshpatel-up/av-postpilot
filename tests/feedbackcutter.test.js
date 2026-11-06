@@ -65,6 +65,16 @@ test('a Python set on the page is used instead of the built-in engine', () => {
   assert.strictEqual(builtin.getExe(), 'C:\\x\\feedback-engine.exe');
 });
 
+test('each Mac architecture has its own engine build', () => {
+  const root = path.join('r');
+  assert.strictEqual(fc.engineDir(root, 'win32', 'x64'), path.join('r', 'vendor', 'feedback-engine', 'win'));
+  assert.strictEqual(fc.engineDir(root, 'darwin', 'arm64'), path.join('r', 'vendor', 'feedback-engine', 'mac-arm64'));
+  assert.strictEqual(fc.engineDir(root, 'darwin', 'x64'), path.join('r', 'vendor', 'feedback-engine', 'mac-x64'));
+  assert.strictEqual(fc.engineDir(root, 'linux', 'x64'), '');
+  assert.strictEqual(fc.engineExeName('win32'), 'feedback-engine.exe');
+  assert.strictEqual(fc.engineExeName('darwin'), 'feedback-engine');
+});
+
 test('the built engine counts as out of date once a source file changes', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'engine-'));
   const files = ['scripts/feedback-engine-requirements.txt', 'scripts/build-feedback-engine.js', 'scripts/feedback-engine-main.py',
@@ -75,7 +85,7 @@ test('the built engine counts as out of date once a source file changes', () => 
     fs.writeFileSync(path.join(root, f), f);
   }
   assert.strictEqual(fc.builtEngineOutdated(root), false);   // never built: nothing to go out of date
-  const stamp = path.join(root, 'vendor', 'feedback-engine', 'win', 'SOURCES');
+  const stamp = path.join(fc.engineDir(root), 'SOURCES');
   fs.mkdirSync(path.dirname(stamp), { recursive: true });
   fs.writeFileSync(stamp, `${fc.engineDigest(root)}\n`);
   assert.strictEqual(fc.builtEngineOutdated(root), false);
