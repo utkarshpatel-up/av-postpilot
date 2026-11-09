@@ -11,9 +11,9 @@
     "fetch-handbrake": "node scripts/fetch-handbrake.js",
     "build-feedback-engine": "node scripts/build-feedback-engine.js",
     "predist:win": "node scripts/fetch-handbrake.js win && node scripts/build-feedback-engine.js",
-    "dist:win": "electron-builder --win nsis --x64",
+    "dist:win": "electron-builder --win nsis --x64 --publish never",
     "predist:zip": "node scripts/fetch-handbrake.js win && node scripts/build-feedback-engine.js",
-    "dist:zip": "electron-builder --win zip --x64 -c.win.artifactName=AV-PostPilot-${version}-Windows-Portable.${ext}",
+    "dist:zip": "electron-builder --win zip --x64 --publish never -c.win.artifactName=AV-PostPilot-${version}-Windows-Portable.${ext}",
     "predist:mac": "node scripts/fetch-handbrake.js mac",
     "dist:mac": "electron-builder --mac dmg --x64 --arm64 --publish never"
   },
@@ -23,6 +23,12 @@
   },
   "build": {
     "appId": "com.house.avpostpilot",
+    "publish": {
+      "provider": "github",
+      "owner": "utkarshpatel-up",
+      "repo": "av-postpilot",
+      "releaseType": "release"
+    },
     "productName": "AV PostPilot",
     "directories": {
       "buildResources": "build",
@@ -85,6 +91,7 @@
     ]
   },
   "dependencies": {
+    "electron-updater": "^6.8.11",
     "nodemailer": "^10.0.15",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },

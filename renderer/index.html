@@ -1121,6 +1121,12 @@
     <!-- ================================================= Settings -->
     <section class="page" id="page-settings">
       <h1>Settings</h1>
+      <div class="card" id="upd-card">
+        <div class="card-label">Updates</div>
+        <div class="row"><span id="upd-status" class="grow">Checking…</span><button class="btn" id="upd-check">Check for updates</button><button class="btn primary hidden" id="upd-install">Restart to install</button></div>
+        <progress id="upd-bar" class="hidden" max="100" value="0" style="width:100%"></progress>
+        <div class="muted small" id="upd-note"></div>
+      </div>
       <div class="card">
         <div class="card-label">DaVinci Resolve</div>
         <div class="row">
