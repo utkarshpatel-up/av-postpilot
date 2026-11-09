@@ -1,0 +1,46 @@
+name: Publish Windows release
+# Pushing a tag like v3.4.0 (must equal package.json "version") builds the Windows installer and
+# publishes it as a stable GitHub release together with latest.yml and the .blockmap, which
+# installed copies read to update themselves. See docs/RELEASING.md.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+jobs:
+  windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write   # electron-builder creates the release and uploads its files
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        id: python
+        with:
+          python-version: '3.14'
+          architecture: x64
+      - name: Tag must match package.json version
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          [ "$GITHUB_REF_NAME" = "v$version" ] || { echo "Tag $GITHUB_REF_NAME does not match version $version"; exit 1; }
+      - run: npm ci
+      - run: npm test
+      - name: Fetch HandBrakeCLI and build the audio engine
+        run: |
+          node scripts/fetch-handbrake.js win
+          node scripts/build-feedback-engine.js
+        env:
+          FEEDBACK_ENGINE_PYTHON: ${{ steps.python.outputs.python-path }}
+      # --publish always: uploads AV-PostPilot-<version>-Windows-Setup.exe, its .blockmap and latest.yml
+      # to the release for this tag (created as a published, non-draft, non-prerelease release).
+      - run: npx electron-builder --win nsis --x64 --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Check the update files are all there
+        shell: bash
+        run: ls dist/latest.yml dist/AV-PostPilot-*-Windows-Setup.exe dist/AV-PostPilot-*-Windows-Setup.exe.blockmap

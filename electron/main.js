@@ -15,6 +15,7 @@ const { collectHdFiles } = require('./hdreview');
 const { SceneQueue } = require('./scenequeue');
 const { NightQueue } = require('./nightqueue');
 const { Encoder } = require('./encoder');
+const { Updater, unsupportedReason, installGate } = require('./updater');
 const { HandBrake, DEFAULTS: HANDBRAKE_DEFAULTS, presetName: handbrakePreset, findCli: findHandbrakeCli, bundledCli } = require('./handbrake');
 const { MediaPreview } = require('./media-preview');
 const HANDBRAKE_VERSION = require('../package.json').handbrakeCli.version;
@@ -298,7 +299,7 @@ const countdown = (v) => Math.min(24 * 3600, Math.max(10, Number(v) || 60));
 const mmss = (s) => (s >= 60 ? `${Math.floor(s / 60)} min${s % 60 ? ` ${s % 60} s` : ''}` : `${s} s`);
 function scheduleShutdown(reason, seconds = countdown(settings.renders.shutdownSeconds)) {
   if (process.platform !== 'win32') { log('warn', 'Automatic shutdown is currently supported on Windows only'); return; }
-  if (shutdownAt) return;
+  if (shutdownAt || updater.installing) return;
   shutdownAt = Date.now() + seconds * 1000;
   shutdownReason = reason;
   log('warn', `Shutting down in ${mmss(seconds)} (${reason}). Cancel in AV PostPilot.`);
@@ -425,7 +426,7 @@ const stabilization = new Stabilization({ bridge, log, onChange: s => send('stab
   grab:createFrameGrabber({bridge,nativeImage,directory:path.join(DATA,'stabilization-check')}),
   saveReport:report=>fs.writeFileSync(path.join(DATA,'stabilization-last-report.json'),JSON.stringify(report,null,2)),
   history: stabHistory, project: () => status.project?.name || '' });
-autosaver.isPaused = () => encoder.running || stabilization.running;
+autosaver.isPaused = () => encoder.running || stabilization.running || updater.installing;
 
 // Installed font names, for the Premiere title check (Windows registry / Mac font folders).
 let fontCache = null;
@@ -570,6 +571,11 @@ function openClipInfo() {
   if (process.env.AVPP_CLIPSHOT) setTimeout(async () => { log('info', `clip window visible=${clipWin.isVisible()} bounds=${JSON.stringify(clipWin.getBounds())}`); fs.writeFileSync(process.env.AVPP_CLIPSHOT, (await clipWin.webContents.capturePage()).toPNG()); }, 6000);
   updateTray();
 }
+// Once an update install is requested, no new job may start (see installGate in updater.js).
+{
+  const handle = ipcMain.handle.bind(ipcMain);
+  ipcMain.handle = (channel, fn) => handle(channel, (e, ...args) => (updater.installing && installGate(channel, args)) || fn(e, ...args));
+}
 ipcMain.handle('clipinfo-toggle', () => applySettings({ ...settings, clipInfo: !settings.clipInfo }));
 // The window grows upwards when '+ more' is opened, so it stays in its corner.
 ipcMain.handle('clipinfo-height', (_e, height) => {
@@ -668,10 +674,35 @@ ipcMain.handle('library-backup', async (_e, action, options = {}) => {
     throw new Error('Unknown library backup action');
   } catch (err) { return { ok: false, error: err.message }; }
 });
+// Automatic updates: never installs while anything is running or unsaved (install() asks this).
+function updateBusyReason() {
+  if (stabilization.running || encoder.running || night.running || sceneQueue.running || handbrake.running || autosaver.running || databaseBackup.running) return 'Finish or stop the running operation first, then restart to update';
+  if (status.rendering || renders.active || renders.settling || renders.hdBatch || renders.finished.length || renders.pendingCopies) return 'Wait for the current render to finish, then restart to update';
+  if (premiere.busy || bridge.busy || quietLift.busy || feedback.busy || mediaPreview.child) return 'Wait for the current job to finish, then restart to update';
+  if (shutdownAt) return 'Cancel the planned shutdown first, then restart to update';
+  if (feedbackUnsaved) return 'Save or discard the cleaned audio in Feedback Cutter first, then restart to update';
+  return '';
+}
+const updateReason = unsupportedReason({ isPackaged: app.isPackaged });
+const updater = new Updater({
+  version: app.getVersion(),
+  reason: updateReason,
+  updater: updateReason ? null : require('electron-updater').autoUpdater,
+  busy: updateBusyReason,
+  onChange: (s) => send('update', s),
+  quit: () => app.quit(),
+  log,
+});
+ipcMain.handle('update', async (_e, { action } = {}) => {
+  if (action === 'summary') return { ok: true, ...updater.summary() };
+  if (action === 'check') return updater.check();
+  if (action === 'install') return updater.install();
+  return { ok: false, error: 'Unknown update action' };
+});
 ipcMain.handle('get-initial', () => ({
   settings, status, autosave: autosaver.summary(), log: logLines, platform: process.platform,
   scene: sceneQueue.summary(), encoder: encoder.summary(), night: night.summary(), handbrake: handbrake.summary(), renders: renders.summary(), shutdownAt, shutdownReason,
-  pc: os.hostname(), version: app.getVersion(),
+  pc: os.hostname(), version: app.getVersion(), update: updater.summary(),
 }));
 ipcMain.handle('stabilize', async (_e, args) => {
   try {
@@ -1245,6 +1276,7 @@ app.on('before-quit', e => {
   }
   quitting = true; bridge.stop(); quietLift.stop(); feedback.stop();
 });
+app.on('before-quit', (e) => { if (e.defaultPrevented) updater.installAborted(); });   // after the guards above
 app.on('window-all-closed', (e) => e.preventDefault());
 
 app.whenReady().then(async () => {
@@ -1255,6 +1287,7 @@ app.whenReady().then(async () => {
   log('info', `AV PostPilot ${app.getVersion()} started on ${os.hostname()}`);
   if (settings.launchResolve) await launchResolve();
   autosaver.schedule();
+  updater.start();
   const checkLibraryAge = () => checkOverdue({ settings, stateFile: path.join(DATA, 'library-overdue.json'), notify: (...args) => notifier.notify(...args) }).catch(err => log('warn', `Backup health check: ${err.message}`));
   checkLibraryAge();
   setInterval(checkLibraryAge, 5 * 60 * 1000);

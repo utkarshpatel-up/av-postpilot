@@ -1515,6 +1515,32 @@ $('lb-refresh').addEventListener('click', refreshLibraryStatus);
 pilot.onLibraryBackup(() => { if ($('page-librarybackup').classList.contains('active')) refreshLibraryStatus(); });
 setInterval(() => { if (settings && $('page-librarybackup').classList.contains('active')) refreshLibraryStatus(); }, 30000);
 
+// ------------------------------------------------------------------ updates
+function renderUpdate(u) {
+  const text = {
+    disabled: `Version ${u.version}. ${u.reason}`,
+    idle: u.checkedAt ? `Version ${u.version}. You have the latest version (checked ${new Date(u.checkedAt).toLocaleTimeString()}).` : `Version ${u.version}. Not checked yet.`,
+    checking: `Version ${u.version}. Checking for updates…`,
+    downloading: `Downloading version ${u.available}… ${u.percent}%`,
+    ready: u.installing ? (u.quitBlocked ? `The update to ${u.available} is waiting to install: finish or stop the running operation, then press Quit to finish update.` : `Installing version ${u.available}… PostPilot is restarting.`) : `Version ${u.available} is ready. Restart to install it.`,
+    error: `Version ${u.version}. Update problem: ${u.error}`,
+  }[u.state];
+  $('upd-status').textContent = text;
+  $('upd-bar').classList.toggle('hidden', u.state !== 'downloading');
+  $('upd-bar').value = u.percent;
+  $('upd-check').textContent = u.state === 'error' ? 'Retry' : 'Check for updates';
+  $('upd-check').disabled = !u.enabled || ['checking', 'downloading', 'ready'].includes(u.state);
+  $('upd-install').classList.toggle('hidden', u.state !== 'ready');
+  $('upd-install').disabled = Boolean(u.installing && !u.quitBlocked);
+  $('upd-install').textContent = u.quitBlocked ? 'Quit to finish update' : 'Restart to install';
+}
+$('upd-check').addEventListener('click', () => pilot.update('check'));
+$('upd-install').addEventListener('click', async () => {
+  const r = await pilot.update('install');
+  $('upd-note').textContent = r.ok ? '' : r.error;
+});
+pilot.onUpdate((u) => { $('upd-note').textContent = ''; renderUpdate(u); });
+
 (async () => {
   const init = await pilot.getInitial();
   if (init.platform === 'darwin') {
@@ -1528,6 +1554,7 @@ setInterval(() => { if (settings && $('page-librarybackup').classList.contains('
   pcName = init.pc;
   logEntries = init.log;
   $('pc-name').textContent = init.pc;
+  renderUpdate(init.update);
   $('app-version').textContent = `v${init.version}`;
   $('s-about').textContent = `AV PostPilot v${init.version} · this PC: ${init.pc}`;
   renderDashboard();

@@ -172,6 +172,14 @@ async function moveFile(src, dest) {
   }
 }
 
+// Windows: mkdir -p on an existing drive root (E:\) throws EPERM; an existing folder is fine.
+function mkdirp(dir) {
+  try { fs.mkdirSync(dir, { recursive: true }); } catch (err) {
+    if (err.code === 'EPERM' && fs.existsSync(dir) && fs.statSync(dir).isDirectory()) return;
+    throw err;
+  }
+}
+
 class HandBrake {
   // deps: getSettings() -> settings.handbrake, log, notifier, onChange, onQueueDone(action, what), spawn, defaultReportDir
   constructor(deps) {
@@ -238,8 +246,8 @@ class HandBrake {
     Object.assign(this, { running: true, stopping: false, items: [], startedAt: Date.now(), finishedAt: null, lastError: '' });
     const reportDir = cfg.reportDir ? path.resolve(cfg.reportDir) : this.defaultReportDir;
     try {
-      fs.mkdirSync(cfg.outputDir, { recursive: true });
-      fs.mkdirSync(reportDir, { recursive: true });
+      mkdirp(cfg.outputDir);
+      mkdirp(reportDir);
       const d = new Date(), p2 = (n) => String(n).padStart(2, '0');
       this.reportFile = path.join(reportDir, `log_convert_satsang_${cfg.convertSatsangs ? 1 : 0}_${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}_${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}.txt`);
       this.report(`Input:        ${cfg.inputDir}`);
@@ -250,7 +258,7 @@ class HandBrake {
       this.report(`Mode:         ${cfg.convertSatsangs ? 'Convert everything' : `Clips for Insert only, then ${cfg.copyMp4 ? 'copy' : 'move'} H264 recordings from ${cfg.h264Dir}`}`);
       // Mirror the folders first (empty ones too) so the H264 step can find its targets.
       const step1 = planConvert(cfg);
-      for (const dir of step1.dirs) fs.mkdirSync(dir, { recursive: true });
+      for (const dir of step1.dirs) mkdirp(dir);
       this.items = step1.items.map((i, n) => ({ ...i, id: n + 1, state: i.kind === 'skip' ? 'skipped' : 'waiting' }));
       this.items.filter((i) => i.kind === 'skip').forEach((i) => this.report(`[SKIP] ${i.src} (${i.reason})`));
       this.changed();
@@ -288,7 +296,7 @@ class HandBrake {
       item.state = 'running'; item.startedAt = Date.now(); item.pct = 0;
       this.changed();
       try {
-        await fs.promises.mkdir(path.dirname(item.dest), { recursive: true });
+        mkdirp(path.dirname(item.dest));
         if (item.kind === 'convert') {
           this.report(`[CONVERT] ${item.src} -> ${item.dest}`);
           await this.convert(item, cli, cfg.presetFile, preset);
@@ -385,4 +393,4 @@ class HandBrake {
   }
 }
 
-module.exports = { bundledCli, HandBrake, DEFAULTS, presetName, planConvert, planH264, plannedLister, findCli, lcsLen };
+module.exports = { bundledCli, HandBrake, DEFAULTS, presetName, planConvert, planH264, plannedLister, findCli, lcsLen, mkdirp };

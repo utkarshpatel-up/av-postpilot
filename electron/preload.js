@@ -55,6 +55,8 @@ contextBridge.exposeInMainWorld('pilot', {
   pickImage: () => ipcRenderer.invoke('pick-image'),
   // dropped files -> real paths (File.path no longer exists in Electron 32+)
   pathForFile: (file) => webUtils.getPathForFile(file),
+  update: (action) => ipcRenderer.invoke('update', { action }),
+  onUpdate: on('update'),
   onEncoder: on('encoder'),
   onScene: on('scene'),
   onNight: on('night'),
