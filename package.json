@@ -1,7 +1,7 @@
 {
   "name": "av-postpilot",
   "productName": "AV PostPilot",
-  "version": "3.4.2",
+  "version": "3.4.4",
   "description": "Edit-bay assistant for DaVinci Resolve: automatic .drp backups, render actions and notifications",
   "main": "electron/main.js",
   "scripts": {
@@ -99,8 +99,9 @@
     "version": "1.11.2",
     "files": {
       "win": {
-        "name": "HandBrakeCLI-1.11.2-win-x86_64.zip",
-        "sha256": "80bfe8d5f5d11cc3ef76b834add3ed4e82dee6523ffeb435c283f88b1a21f09d"
+        "version": "1.9.2",
+        "name": "HandBrakeCLI-1.9.2-win-x86_64.zip",
+        "sha256": "cc875eda177a4105b99664136719c893db989a4456c4d3a9fc9e8d8742018413"
       },
       "mac": {
         "name": "HandBrakeCLI-1.11.2.dmg",

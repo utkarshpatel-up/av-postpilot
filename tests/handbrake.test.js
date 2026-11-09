@@ -187,7 +187,7 @@ test('a preset for a graphics card this PC lacks gets a clear message', async ()
   const nvenc = '[hevc_nvenc @ 0001] Cannot load nvcuda.dll\nencavcodecInit: avcodec_open failed\nERROR: Failure to initialise thread\naac-decoder done: 0 frames, 0 decoder errors\n';
   const hb = new HandBrake({ getSettings: () => cfg, log: () => {}, spawn: fakeSpawn([], { fail: () => true, stderr: nvenc }), defaultReportDir: path.join(root, 'R') });
   await hb.start();
-  assert.match(hb.items[0].error, /NVIDIA NVENC encoder, which this PC does not have/);
+  assert.match(hb.items[0].error, /NVIDIA NVENC encoder in this preset could not start: .*nvcuda.*outdated graphics driver/);
 });
 
 test('mkdirp ignores EPERM on an existing folder (Windows drive root) but not real errors', () => {
@@ -251,4 +251,30 @@ test('a CLI that cannot start and a missing GPU both carry the command and log',
   const hb2 = new HandBrake({ getSettings: () => cfg, log: () => {}, spawn: fakeSpawn([], { fail: () => true, stderr: nvenc }), defaultReportDir: path.join(root, 'R2') });
   await hb2.start();
   assert.match(fs.readFileSync(hb2.reportFile, 'utf8'), /details:[\s\S]*nvcuda/);
+});
+
+test('an NVENC driver mismatch shows the driver requirement, even when split across output chunks', async () => {
+  const root = tree({ 'In/Cam-01/a.MOV': 'v', 'Preset/p.json': INPUT['Preset/p.json'], 'cli/HandBrakeCLI': '' });
+  const cfg = { inputDir: path.join(root, 'In'), outputDir: path.join(root, 'Out'), presetFile: path.join(root, 'Preset/p.json'), cliPath: path.join(root, 'cli/HandBrakeCLI'), convertSatsangs: true };
+  const spawn = () => {
+    const c = new EventEmitter(); c.stdout = new EventEmitter(); c.stderr = new EventEmitter(); c.kill = () => {};
+    setImmediate(() => {
+      c.stderr.emit('data', 'Failed to read the optional fonts folder\n[hevc_nvenc @ 0001] Driver does not support the required nvenc API version. Required: 13.0 Found: 12.1\n');
+      c.stderr.emit('data', '[hevc_nvenc @ 0001] The minimum required Nvidia driver for nvenc is 570.0 or newer\n');
+      c.stderr.emit('data', 'encavcodecInit: avcodec_open failed\nEncode failed (error 3)\n');
+      c.emit('close', 3);
+    });
+    return c;
+  };
+  const hb = new HandBrake({ getSettings: () => cfg, log: () => {}, spawn, defaultReportDir: path.join(root, 'R') });
+  await hb.start();
+  assert.match(hb.items[0].error, /NVENC encoder in this preset could not start: .*Required: 13\.0.*570\.0 or newer/);
+  assert.doesNotMatch(hb.items[0].error, /fonts folder/);
+});
+
+test('Windows keeps a HandBrakeCLI whose NVENC works on drivers older than 570 (1.10+ needs 570)', () => {
+  const { handbrakeCli: pin } = require('../package.json');
+  assert.equal(pin.files.win.version, '1.9.2');
+  assert.ok(pin.files.win.name.includes(pin.files.win.version));
+  assert.ok(pin.files.mac.name.includes(pin.version), 'Mac stays on the main version');
 });
