@@ -360,7 +360,7 @@ class HandBrake {
       log(`HandBrakeCLI: ${cli}\nPreset: ${preset} (${presetFile})\nCommand: ${command}\n\n`);
       const causes = [], tailLines = [];
       let partial = { out: '', err: '' }, lastProgress = 0, last = 0, gpu = '', tail = '';
-      const CAUSE = /\berror\b|fail|invalid|cannot|can't|unable|unsupported|not found|no such|no title|denied|nvcuda|out of memory/i;
+      const CAUSE = /\berror\b|fail|invalid|cannot|can't|unable|unsupported|not support|minimum required|not found|no such|no title|denied|nvcuda|out of memory/i;
       const line = (l) => {
         l = l.trim();
         if (!l) return;
@@ -398,7 +398,7 @@ class HandBrake {
         errFeed(buf);
         tail = (tail + buf).slice(-4000);
         // The encoder of a hardware preset could not start (no such graphics card here).
-        if (/hevc_nvenc|h264_nvenc|av1_nvenc/.test(buf) && /nvcuda|avcodec_open failed/i.test(tail)) gpu = 'NVIDIA NVENC';
+        if (/hevc_nvenc|h264_nvenc|av1_nvenc/.test(tail) && /nvcuda|avcodec_open failed/i.test(tail)) gpu = 'NVIDIA NVENC';
         else if (/qsv.*(open|init).*fail/i.test(buf)) gpu = 'Intel Quick Sync';
         else if (/(amf|vce).*(open|init).*fail/i.test(buf)) gpu = 'AMD VCE';
       });
@@ -411,7 +411,9 @@ class HandBrake {
         // Never leave a half-written file: the next run would skip it as "already converted".
         try { fs.unlinkSync(out); } catch { /* not there */ }
         if (this.stopping) return reject(Error('stopped'));
-        if (gpu) return reject(fail(`The ${gpu} encoder in this preset could not start${causes.length ? `: ${causes.slice(0, 2).join(' | ')}` : ''}. This can mean there is no such graphics card, but also an outdated graphics driver, another program using the encoder, or a different HandBrakeCLI version than the one that works for you (choose it with Choose…). The full output is in the HandBrake log next to the report.`));
+        const nvLines = causes.filter((l) => /nvenc|minimum required|nvcuda/i.test(l));
+        const gpuCause = (nvLines.length ? nvLines : causes).slice(0, 2);
+        if (gpu) return reject(fail(`The ${gpu} encoder in this preset could not start${gpuCause.length ? `: ${gpuCause.join(' | ')}` : ''}. This can mean there is no such graphics card, but also an outdated graphics driver, another program using the encoder, or a different HandBrakeCLI version than the one that works for you (choose it with Choose…). The full output is in the HandBrake log next to the report.`));
         // The first error line is usually the cause; the last lines are often just the generic footer.
         const first = causes.find((l) => !/^Encode failed|^ERROR: Encode failed/i.test(l)) || causes[0];
         reject(fail(`HandBrakeCLI exit code ${code}${first ? `: ${first}` : ''}${tailLines.length ? ` (last output: ${tailLines.slice(-3).join(' | ')})` : ''}`));

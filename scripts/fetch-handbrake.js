@@ -2,6 +2,7 @@
 // (resources/handbrake), so PostPilot never needs HandBrake installed separately.
 //   node scripts/fetch-handbrake.js [win|mac] [--zip path-to-already-downloaded-file]
 // The version and SHA-256 of each download are pinned in package.json (handbrakeCli).
+// Windows stays on 1.9.2 (a per-file "version"): 1.10+ needs NVIDIA driver 570+ for NVENC, 1.9.2 needs 551.76+.
 // Runs before npm start / dist:* and does nothing when the right version is already there.
 const crypto = require('crypto');
 const fs = require('fs');
@@ -15,6 +16,7 @@ const args = process.argv.slice(2);
 const target = args.find((a) => a === 'win' || a === 'mac') || (process.platform === 'darwin' ? 'mac' : 'win');
 const zipArg = args.includes('--zip') ? args[args.indexOf('--zip') + 1] : process.env.HANDBRAKE_DOWNLOAD;
 const file = pin.files[target];
+const version = file.version || pin.version;
 const dest = path.join(ROOT, 'vendor', 'handbrake', target);
 const exe = path.join(dest, target === 'win' ? 'HandBrakeCLI.exe' : 'HandBrakeCLI');
 const stamp = path.join(dest, 'VERSION');
@@ -25,7 +27,7 @@ async function download() {
   const cache = path.join(ROOT, 'vendor', 'handbrake', 'downloads', file.name);
   for (const p of [zipArg, cache]) if (p && fs.existsSync(p) && sha256(p) === file.sha256) return p;
   if (zipArg) throw new Error(`${zipArg} is not ${file.name} (SHA-256 differs)`);
-  const src = `https://github.com/HandBrake/HandBrake/releases/download/${pin.version}/${file.name}`;
+  const src = `https://github.com/HandBrake/HandBrake/releases/download/${version}/${file.name}`;
   console.log(`Downloading ${src}`);
   const res = await fetch(src);
   if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
@@ -62,8 +64,8 @@ function extractMac(dmg, tmp) {
 }
 
 (async () => {
-  if (fs.existsSync(exe) && fs.existsSync(stamp) && fs.readFileSync(stamp, 'utf8').trim() === pin.version) {
-    console.log(`HandBrakeCLI ${pin.version} (${target}) is already in ${path.relative(ROOT, dest)}`);
+  if (fs.existsSync(exe) && fs.existsSync(stamp) && fs.readFileSync(stamp, 'utf8').trim() === version) {
+    console.log(`HandBrakeCLI ${version} (${target}) is already in ${path.relative(ROOT, dest)}`);
     return;
   }
   const src = await download();
@@ -76,8 +78,8 @@ function extractMac(dmg, tmp) {
     if (target === 'mac') fs.chmodSync(exe, 0o755);
     // HandBrake is GPL-2.0: its licence travels with the binary
     if (fs.existsSync(docs)) for (const f of fs.readdirSync(docs)) if (/^(COPYING|LICENSE)/i.test(f)) fs.copyFileSync(path.join(docs, f), path.join(dest, `HandBrake-${f}`));
-    fs.writeFileSync(stamp, `${pin.version}\n`);
-    console.log(`HandBrakeCLI ${pin.version} (${target}) → ${path.relative(ROOT, dest)}`);
+    fs.writeFileSync(stamp, `${version}\n`);
+    console.log(`HandBrakeCLI ${version} (${target}) → ${path.relative(ROOT, dest)}`);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
