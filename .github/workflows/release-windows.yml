@@ -6,6 +6,10 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to build and attach the portable ZIP to (e.g. v3.4.0)'
+        required: true
 jobs:
   windows:
     runs-on: windows-latest
@@ -13,6 +17,8 @@ jobs:
       contents: write   # electron-builder creates the release and uploads its files
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -26,7 +32,8 @@ jobs:
         shell: bash
         run: |
           version=$(node -p "require('./package.json').version")
-          [ "$GITHUB_REF_NAME" = "v$version" ] || { echo "Tag $GITHUB_REF_NAME does not match version $version"; exit 1; }
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          [ "$tag" = "v$version" ] || { echo "Tag $tag does not match version $version"; exit 1; }
       - run: npm ci
       - run: npm test
       - name: Fetch HandBrakeCLI and build the audio engine
@@ -37,10 +44,22 @@ jobs:
           FEEDBACK_ENGINE_PYTHON: ${{ steps.python.outputs.python-path }}
       # --publish always: uploads AV-PostPilot-<version>-Windows-Setup.exe, its .blockmap and latest.yml
       # to the release for this tag (created as a published, non-draft, non-prerelease release).
-      - run: npx electron-builder --win nsis --x64 --publish always
+      - if: github.event_name == 'push'
+        run: npx electron-builder --win nsis --x64 --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
       - name: Check the update files are all there
+        if: github.event_name == 'push'
         shell: bash
         run: ls dist/latest.yml dist/AV-PostPilot-*-Windows-Setup.exe dist/AV-PostPilot-*-Windows-Setup.exe.blockmap
+      # Every Windows build also gets a portable ZIP (no auto-update; latest.yml is not touched).
+      - run: npm run dist:zip
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          FEEDBACK_ENGINE_PYTHON: ${{ steps.python.outputs.python-path }}
+      - name: Attach the portable ZIP to the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "${{ github.event.inputs.tag || github.ref_name }}" dist/AV-PostPilot-*-Windows-Portable.zip --clobber

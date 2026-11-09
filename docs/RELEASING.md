@@ -10,7 +10,9 @@ and installing is refused while a job is running or Feedback Cutter audio is uns
 2. Tag and push: `git tag v3.4.0 && git push origin v3.4.0`.
 3. The **Publish Windows release** workflow checks the tag equals the version, runs the tests, builds
    the NSIS installer and publishes a stable release containing, together:
-   `AV-PostPilot-<version>-Windows-Setup.exe`, `AV-PostPilot-<version>-Windows-Setup.exe.blockmap`, `latest.yml`.
+   `AV-PostPilot-<version>-Windows-Setup.exe`, `AV-PostPilot-<version>-Windows-Setup.exe.blockmap`, `latest.yml`,
+   plus `AV-PostPilot-<version>-Windows-Portable.zip` (built every time; it does not auto-update).
+   To add a ZIP to an older tag: run the workflow manually (Actions → Publish Windows release → tag).
 
 By hand instead (Windows, with Python for the audio engine; `GH_TOKEN` = a token with repo contents write):
 ```
