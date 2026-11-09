@@ -313,6 +313,7 @@ class HandBrake {
         item.state = this.stopping && item.kind === 'convert' ? 'skipped' : 'failed';
         item.error = this.stopping && item.kind === 'convert' ? 'stopped' : err.message;
         this.report(`[ERROR] ${item.src}: ${item.error}`);
+        if (err.detail) this.report(`HandBrakeCLI command and last output:\n${err.detail}`);
         if (item.state === 'failed') this.log('error', `HandBrake: ${path.basename(item.src)}: ${err.message}`);
       }
       item.finishedAt = Date.now();
@@ -380,7 +381,10 @@ class HandBrake {
         if (gpu) return reject(Error(`The preset uses the ${gpu} encoder, which this PC does not have. Export the preset again with a CPU encoder (e.g. H.265 10-bit (x265)), or convert on a PC with that graphics card.`));
         const why = tail.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).reverse()
           .find((l) => /^ERROR|failed|invalid|cannot|unable|no title/i.test(l) && !/\b0 [\w ]*errors/i.test(l));
-        reject(Error(`HandBrakeCLI exit code ${code}${why ? `: ${why}` : ''}`));
+        const lines = tail.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+        const err = Error(`HandBrakeCLI exit code ${code}${why ? `: ${why}` : ''}${lines.length ? ` (last output: ${lines.slice(-3).join(' | ')})` : ''}`);
+        err.detail = `${cli} ${args.map((a) => `"${a}"`).join(' ')}\n${lines.slice(-40).join('\n')}`;   // for the report file
+        reject(err);
       });
     });
   }

@@ -199,3 +199,13 @@ test('mkdirp ignores EPERM on an existing folder (Windows drive root) but not re
     assert.throws(() => mkdirp(path.join(dir, 'pp-nope-' + process.pid, 'x')), /EPERM/);
   } finally { fs.mkdirSync = real; }
 });
+
+test('a failed encode reports the command and HandBrake output in the message and the report', async () => {
+  const root = tree({ 'In/Cam-01/a.MOV': 'v', 'Preset/p.json': INPUT['Preset/p.json'], 'cli/HandBrakeCLI': '' });
+  const cfg = { inputDir: path.join(root, 'In'), outputDir: path.join(root, 'Out'), presetFile: path.join(root, 'Preset/p.json'), cliPath: path.join(root, 'cli/HandBrakeCLI'), convertSatsangs: true };
+  const hb = new HandBrake({ getSettings: () => cfg, log: () => {}, spawn: fakeSpawn([], { fail: () => true, stderr: 'x265 [error]: bad param\nEncode failed (error 3)\n' }), defaultReportDir: path.join(root, 'R') });
+  await hb.start();
+  assert.match(hb.items[0].error, /exit code 3.*last output: .*bad param/);
+  const report = fs.readFileSync(hb.reportFile, 'utf8');
+  assert.match(report, /command and last output:[\s\S]*--preset-import-file[\s\S]*bad param/);
+});
