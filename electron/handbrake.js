@@ -411,7 +411,7 @@ class HandBrake {
         // Never leave a half-written file: the next run would skip it as "already converted".
         try { fs.unlinkSync(out); } catch { /* not there */ }
         if (this.stopping) return reject(Error('stopped'));
-        if (gpu) return reject(fail(`The preset uses the ${gpu} encoder, which this PC does not have. Export the preset again with a CPU encoder (e.g. H.265 10-bit (x265)), or convert on a PC with that graphics card.`));
+        if (gpu) return reject(fail(`The ${gpu} encoder in this preset could not start${causes.length ? `: ${causes.slice(0, 2).join(' | ')}` : ''}. This can mean there is no such graphics card, but also an outdated graphics driver, another program using the encoder, or a different HandBrakeCLI version than the one that works for you (choose it with Choose…). The full output is in the HandBrake log next to the report.`));
         // The first error line is usually the cause; the last lines are often just the generic footer.
         const first = causes.find((l) => !/^Encode failed|^ERROR: Encode failed/i.test(l)) || causes[0];
         reject(fail(`HandBrakeCLI exit code ${code}${first ? `: ${first}` : ''}${tailLines.length ? ` (last output: ${tailLines.slice(-3).join(' | ')})` : ''}`));

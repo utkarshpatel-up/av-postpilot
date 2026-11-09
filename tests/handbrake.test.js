@@ -187,7 +187,7 @@ test('a preset for a graphics card this PC lacks gets a clear message', async ()
   const nvenc = '[hevc_nvenc @ 0001] Cannot load nvcuda.dll\nencavcodecInit: avcodec_open failed\nERROR: Failure to initialise thread\naac-decoder done: 0 frames, 0 decoder errors\n';
   const hb = new HandBrake({ getSettings: () => cfg, log: () => {}, spawn: fakeSpawn([], { fail: () => true, stderr: nvenc }), defaultReportDir: path.join(root, 'R') });
   await hb.start();
-  assert.match(hb.items[0].error, /NVIDIA NVENC encoder, which this PC does not have/);
+  assert.match(hb.items[0].error, /NVIDIA NVENC encoder in this preset could not start: .*nvcuda.*outdated graphics driver/);
 });
 
 test('mkdirp ignores EPERM on an existing folder (Windows drive root) but not real errors', () => {
