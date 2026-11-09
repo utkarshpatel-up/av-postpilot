@@ -1535,11 +1535,12 @@ function renderUpdate(u) {
   $('upd-install').textContent = u.quitBlocked ? 'Quit to finish update' : 'Restart to install';
 }
 $('upd-check').addEventListener('click', () => pilot.update('check'));
+$('upd-check').title = 'Looks for a newer version and, if there is one, installs it and restarts PostPilot';
 $('upd-install').addEventListener('click', async () => {
   const r = await pilot.update('install');
   $('upd-note').textContent = r.ok ? '' : r.error;
 });
-pilot.onUpdate((u) => { $('upd-note').textContent = ''; renderUpdate(u); });
+pilot.onUpdate((u) => { $('upd-note').textContent = u.notice; renderUpdate(u); });
 
 (async () => {
   const init = await pilot.getInitial();
@@ -1554,7 +1555,7 @@ pilot.onUpdate((u) => { $('upd-note').textContent = ''; renderUpdate(u); });
   pcName = init.pc;
   logEntries = init.log;
   $('pc-name').textContent = init.pc;
-  renderUpdate(init.update);
+  renderUpdate(init.update); $('upd-note').textContent = init.update.notice;
   $('app-version').textContent = `v${init.version}`;
   $('s-about').textContent = `AV PostPilot v${init.version} · this PC: ${init.pc}`;
   renderDashboard();

@@ -14,7 +14,7 @@ function unsupportedReason({ platform = process.platform, isPackaged, execPath =
   if (platform === 'darwin') return 'Automatic updates are not available on macOS yet (the app is not signed with an Apple Developer ID). Download the new DMG from the releases page.';
   if (platform !== 'win32') return 'Automatic updates are only available in the Windows installer.';
   if (env.PORTABLE_EXECUTABLE_FILE || !exists(path.join(path.dirname(execPath), `Uninstall ${path.basename(execPath, '.exe')}.exe`)) || !exists(path.join(resourcesPath || '', 'app-update.yml'))) {
-    return 'This is the portable (ZIP) copy, which cannot update itself. Download the Windows Setup installer once to get automatic updates.';
+    return 'This is the portable (ZIP) copy, which cannot update itself. Download the newest Windows-Portable.zip from the releases page and unzip it, or install the Windows Setup to get automatic updates.';
   }
   return '';
 }
@@ -31,13 +31,16 @@ class Updater {
     updater.on('update-available', (info) => { this.available = info?.version || ''; this.set('downloading', { percent: 0 }); this.download(); });
     updater.on('update-not-available', () => this.set('idle', { checkedAt: Date.now(), available: '' }));
     updater.on('download-progress', (p) => this.set('downloading', { percent: Math.round(p?.percent || 0) }));
-    updater.on('update-downloaded', (info) => { this.available = info?.version || this.available; this.set('ready', { percent: 100 }); this.log('info', `Update ${this.available} downloaded; restart to install`); });
+    updater.on('update-downloaded', (info) => { this.available = info?.version || this.available; this.set('ready', { percent: 100 }); this.log('info', `Update ${this.available} downloaded; restart to install`);
+      // The user pressed "Check for updates": install as soon as it is downloaded (install() still refuses while busy).
+      if (this.installWhenReady) this.autoInstall();
+    });
     updater.on('error', (err) => this.fail(err));
   }
 
   summary() {
-    const { state, version, available, percent, error, checkedAt, reason, installing, quitBlocked } = this;
-    return { state, version, available, percent, error, checkedAt, reason, installing, quitBlocked: Boolean(quitBlocked), enabled: !this.reason };
+    const { state, version, available, percent, error, checkedAt, reason, installing, quitBlocked, notice } = this;
+    return { state, version, available, percent, error, checkedAt, reason, installing, quitBlocked: Boolean(quitBlocked), notice: notice || '', enabled: !this.reason };
   }
   set(state, extra = {}) { Object.assign(this, { state, error: '' }, extra); this.onChange(this.summary()); }
   fail(err) {
@@ -61,14 +64,25 @@ class Updater {
   }
 
   // Check, and download what is found. Never overlaps with a running check/download or a ready update.
-  async check() {
+  // install: the user pressed the button, so a found update is installed without a second click.
+  async check({ install = false } = {}) {
     if (this.reason) return { ok: false, error: this.reason };
+    this.notice = '';
+    if (install) this.installWhenReady = true;
+    if (this.state === 'ready' && install) { this.autoInstall(); return { ok: true, ...this.summary() }; }
     if (this.state === 'checking' || this.state === 'downloading' || this.state === 'ready') return { ok: true, ...this.summary() };
     this.set('checking');
     try { await this.updater.checkForUpdates(); } catch (err) { this.fail(err); }
     // checkForUpdates resolved with no event at all (e.g. a feed that is not published yet)
     if (this.state === 'checking') this.set('idle', { checkedAt: Date.now() });
+    if (this.state !== 'ready' && this.state !== 'downloading') this.installWhenReady = false;
     return { ok: this.state !== 'error', ...this.summary() };
+  }
+
+  autoInstall() {
+    this.installWhenReady = false;
+    const r = this.install();
+    if (!r.ok) { this.notice = `The update is downloaded but not installed yet: ${r.error}`; this.onChange(this.summary()); }
   }
 
   async download() {
