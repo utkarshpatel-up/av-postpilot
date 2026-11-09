@@ -313,7 +313,7 @@ class HandBrake {
         item.state = this.stopping && item.kind === 'convert' ? 'skipped' : 'failed';
         item.error = this.stopping && item.kind === 'convert' ? 'stopped' : err.message;
         this.report(`[ERROR] ${item.src}: ${item.error}`);
-        if (err.detail) this.report(`HandBrakeCLI command and last output:\n${err.detail}`);
+        if (err.detail) this.report(`HandBrakeCLI details:\n${err.detail}`);
         if (item.state === 'failed') this.log('error', `HandBrake: ${path.basename(item.src)}: ${err.message}`);
       }
       item.finishedAt = Date.now();
@@ -352,8 +352,31 @@ class HandBrake {
   encode(item, cli, presetFile, preset, input, out) {
     return new Promise((resolve, reject) => {
       const args = ['-i', input, '-o', out, '--preset-import-file', presetFile, '--preset', preset];
-      const child = this.child = this.spawn(cli, args, { windowsHide: true });
-      let tail = '', last = 0, gpu = '';
+      const command = `${cli} ${args.map((a) => `"${a}"`).join(' ')}`;
+      // Everything HandBrakeCLI prints (stdout + stderr) goes to its own log next to the report,
+      // progress lines at most once a minute; the cause is often far above the "Encode failed" footer.
+      const logFile = this.reportFile ? this.reportFile.replace(/\.txt$/, `_${item.id}_handbrake.log`) : null;
+      const log = (text) => { if (logFile) try { fs.appendFileSync(logFile, text); } catch { /* the report still has the rest */ } };
+      log(`HandBrakeCLI: ${cli}\nPreset: ${preset} (${presetFile})\nCommand: ${command}\n\n`);
+      const causes = [], tailLines = [];
+      let partial = { out: '', err: '' }, lastProgress = 0, last = 0, gpu = '', tail = '';
+      const CAUSE = /\berror\b|fail|invalid|cannot|can't|unable|unsupported|not found|no such|no title|denied|nvcuda|out of memory/i;
+      const line = (l) => {
+        l = l.trim();
+        if (!l) return;
+        if (/^Encoding: task/.test(l)) { if (Date.now() - lastProgress < 60000) return; lastProgress = Date.now(); }
+        else {
+          if (CAUSE.test(l) && !/\b0 [\w ]*errors/i.test(l) && causes.length < 20 && !causes.includes(l)) causes.push(l);
+          tailLines.push(l); if (tailLines.length > 40) tailLines.shift();
+        }
+        log(`${l}\n`);
+      };
+      const feed = (which) => (buf) => {
+        const text = partial[which] + String(buf);
+        const parts = text.split(/\r\n|\n|\r/);
+        partial[which] = parts.pop();
+        parts.forEach(line);
+      };
       const onOut = (buf) => {
         // "Encoding: task 1 of 1, 45.12 % (80.1 fps, avg 82.3 fps, ETA 00h03m10s)"
         const m = [...String(buf).matchAll(/Encoding: task (\d+) of (\d+), ([\d.]+) %(?:.*?ETA (\d+)h(\d+)m(\d+)s)?/g)].pop();
@@ -363,28 +386,35 @@ class HandBrake {
         item.eta = h != null ? Number(h) * 3600 + Number(mi) * 60 + Number(s) : null;
         if (Date.now() - last > 1000) { last = Date.now(); this.changed(); }
       };
-      child.stdout?.on('data', onOut);
+      const fail = (message) => {
+        const err = Error(message);
+        err.detail = `${command}\n${causes.length ? `Error lines seen (first ${causes.length}):\n${causes.join('\n')}\n` : ''}Last output:\n${tailLines.join('\n')}${logFile ? `\nFull HandBrakeCLI log: ${logFile}` : ''}`;
+        return err;
+      };
+      const child = this.child = this.spawn(cli, args, { windowsHide: true });
+      const outFeed = feed('out'), errFeed = feed('err');
+      child.stdout?.on('data', (buf) => { onOut(buf); outFeed(buf); });
       child.stderr?.on('data', (buf) => {
+        errFeed(buf);
         tail = (tail + buf).slice(-4000);
         // The encoder of a hardware preset could not start (no such graphics card here).
         if (/hevc_nvenc|h264_nvenc|av1_nvenc/.test(buf) && /nvcuda|avcodec_open failed/i.test(tail)) gpu = 'NVIDIA NVENC';
         else if (/qsv.*(open|init).*fail/i.test(buf)) gpu = 'Intel Quick Sync';
         else if (/(amf|vce).*(open|init).*fail/i.test(buf)) gpu = 'AMD VCE';
       });
-      child.on('error', (err) => { this.child = null; reject(err); });
+      child.on('error', (err) => { this.child = null; log(`Could not start: ${err.message}\n`); const e = fail(`Could not start HandBrakeCLI: ${err.message}`); e.code = err.code; reject(e); });
       child.on('close', (code) => {
         this.child = null;
+        partial.out && line(partial.out); partial.err && line(partial.err);
+        log(`\nExit code: ${code}\n`);
         if (code === 0 && !this.stopping && fs.existsSync(out)) { item.pct = 100; return resolve(); }
         // Never leave a half-written file: the next run would skip it as "already converted".
         try { fs.unlinkSync(out); } catch { /* not there */ }
         if (this.stopping) return reject(Error('stopped'));
-        if (gpu) return reject(Error(`The preset uses the ${gpu} encoder, which this PC does not have. Export the preset again with a CPU encoder (e.g. H.265 10-bit (x265)), or convert on a PC with that graphics card.`));
-        const why = tail.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).reverse()
-          .find((l) => /^ERROR|failed|invalid|cannot|unable|no title/i.test(l) && !/\b0 [\w ]*errors/i.test(l));
-        const lines = tail.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-        const err = Error(`HandBrakeCLI exit code ${code}${why ? `: ${why}` : ''}${lines.length ? ` (last output: ${lines.slice(-3).join(' | ')})` : ''}`);
-        err.detail = `${cli} ${args.map((a) => `"${a}"`).join(' ')}\n${lines.slice(-40).join('\n')}`;   // for the report file
-        reject(err);
+        if (gpu) return reject(fail(`The preset uses the ${gpu} encoder, which this PC does not have. Export the preset again with a CPU encoder (e.g. H.265 10-bit (x265)), or convert on a PC with that graphics card.`));
+        // The first error line is usually the cause; the last lines are often just the generic footer.
+        const first = causes.find((l) => !/^Encode failed|^ERROR: Encode failed/i.test(l)) || causes[0];
+        reject(fail(`HandBrakeCLI exit code ${code}${first ? `: ${first}` : ''}${tailLines.length ? ` (last output: ${tailLines.slice(-3).join(' | ')})` : ''}`));
       });
     });
   }

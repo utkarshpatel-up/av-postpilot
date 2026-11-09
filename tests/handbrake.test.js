@@ -207,5 +207,48 @@ test('a failed encode reports the command and HandBrake output in the message an
   await hb.start();
   assert.match(hb.items[0].error, /exit code 3.*last output: .*bad param/);
   const report = fs.readFileSync(hb.reportFile, 'utf8');
-  assert.match(report, /command and last output:[\s\S]*--preset-import-file[\s\S]*bad param/);
+  assert.match(report, /details:[\s\S]*--preset-import-file[\s\S]*bad param/);
+});
+
+test('an early cause survives a long footer, stdout is captured, progress is rate-limited, a full log is written', async () => {
+  const root = tree({ 'In/Cam-01/a.MOV': 'v', 'Preset/p.json': INPUT['Preset/p.json'], 'cli/HandBrakeCLI': '' });
+  const cfg = { inputDir: path.join(root, 'In'), outputDir: path.join(root, 'Out'), presetFile: path.join(root, 'Preset/p.json'), cliPath: path.join(root, 'cli/HandBrakeCLI'), convertSatsangs: true };
+  const spawn = (cli, args) => {
+    const child = new EventEmitter(); child.stdout = new EventEmitter(); child.stderr = new EventEmitter(); child.kill = () => {};
+    setImmediate(() => {
+      for (let i = 0; i < 50; i++) child.stdout.emit('data', `Encoding: task 1 of 1, ${i}.00 % (80 fps, avg 80 fps, ETA 00h00m02s)\r`);
+      child.stdout.emit('data', 'x265 [error]: 10-bit main10 profile not supported by this build\n');
+      child.stderr.emit('data', 'Bytes of footer noise\n'.repeat(600));   // > 4 KB pushes the cause out of a 4 KB tail
+      child.stderr.emit('data', 'Encode failed (error 3)\nHandBrake has exited.');
+      child.emit('close', 3);
+    });
+    return child;
+  };
+  const hb = new HandBrake({ getSettings: () => cfg, log: () => {}, spawn, defaultReportDir: path.join(root, 'R') });
+  await hb.start();
+  assert.match(hb.items[0].error, /exit code 3: x265 \[error\]: 10-bit main10/);
+  const report = fs.readFileSync(hb.reportFile, 'utf8');
+  assert.match(report, /Error lines seen[\s\S]*main10 profile not supported/);
+  const logFile = hb.reportFile.replace(/\.txt$/, '_1_handbrake.log');
+  const full = fs.readFileSync(logFile, 'utf8');
+  assert.match(report, /Full HandBrakeCLI log:/);
+  assert.match(full, /Command: .*--preset-import-file/);
+  assert.match(full, /main10 profile not supported/);
+  assert.match(full, /HandBrake has exited\./);
+  assert.match(full, /Exit code: 3/);
+  assert.equal((full.match(/Encoding: task/g) || []).length, 1, 'progress rate-limited');
+});
+
+test('a CLI that cannot start and a missing GPU both carry the command and log', async () => {
+  const root = tree({ 'In/Cam-01/a.MOV': 'v', 'Preset/p.json': INPUT['Preset/p.json'], 'cli/HandBrakeCLI': '' });
+  const cfg = { inputDir: path.join(root, 'In'), outputDir: path.join(root, 'Out'), presetFile: path.join(root, 'Preset/p.json'), cliPath: path.join(root, 'cli/HandBrakeCLI'), convertSatsangs: true };
+  const noStart = () => { const c = new EventEmitter(); c.stdout = new EventEmitter(); c.stderr = new EventEmitter(); setImmediate(() => c.emit('error', Object.assign(Error('spawn UNKNOWN'), { code: 'UNKNOWN' }))); return c; };
+  const hb = new HandBrake({ getSettings: () => cfg, log: () => {}, spawn: noStart, defaultReportDir: path.join(root, 'R') });
+  await hb.start();
+  assert.match(hb.items[0].error, /Could not start HandBrakeCLI: spawn UNKNOWN/);
+  assert.match(fs.readFileSync(hb.reportFile, 'utf8'), /details:[\s\S]*--preset/);
+  const nvenc = '[hevc_nvenc @ 0001] Cannot load nvcuda.dll\nencavcodecInit: avcodec_open failed\n';
+  const hb2 = new HandBrake({ getSettings: () => cfg, log: () => {}, spawn: fakeSpawn([], { fail: () => true, stderr: nvenc }), defaultReportDir: path.join(root, 'R2') });
+  await hb2.start();
+  assert.match(fs.readFileSync(hb2.reportFile, 'utf8'), /details:[\s\S]*nvcuda/);
 });
