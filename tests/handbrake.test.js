@@ -189,3 +189,13 @@ test('a preset for a graphics card this PC lacks gets a clear message', async ()
   await hb.start();
   assert.match(hb.items[0].error, /NVIDIA NVENC encoder, which this PC does not have/);
 });
+
+test('mkdirp ignores EPERM on an existing folder (Windows drive root) but not real errors', () => {
+  const { mkdirp } = require('../electron/handbrake');
+  const real = fs.mkdirSync, dir = os.tmpdir();
+  try {
+    fs.mkdirSync = () => { throw Object.assign(Error('EPERM'), { code: 'EPERM' }); };
+    mkdirp(dir); // exists: fine
+    assert.throws(() => mkdirp(path.join(dir, 'pp-nope-' + process.pid, 'x')), /EPERM/);
+  } finally { fs.mkdirSync = real; }
+});
