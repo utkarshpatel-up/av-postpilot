@@ -174,3 +174,33 @@ test('main.js wiring: start on launch only, gate and pause while installing', ()
   assert.match(src, /if \(shutdownAt \|\| updater\.installing\) return/);
   assert.match(src, /e\.defaultPrevented\) updater\.installAborted/);
 });
+
+test('manual check installs a found update by itself; background check does not', async () => {
+  for (const manual of [true, false]) {
+    const { updater, up } = make();
+    updater.checkForUpdates = async () => updater.emit('update-available', { version: '3.5.0' });
+    updater.downloadUpdate = async () => updater.emit('update-downloaded', { version: '3.5.0' });
+    await up.check({ install: manual }); await new Promise((r) => setImmediate(r));
+    assert.equal(updater.calls.filter((c) => Array.isArray(c)).length, manual ? 1 : 0);
+    assert.equal(up.state, 'ready');
+  }
+});
+
+test('manual check with a job running downloads, keeps the reason, and does not install', async () => {
+  const { updater, up } = make({}, () => 'Finish or stop the running operation first');
+  updater.checkForUpdates = async () => updater.emit('update-available', { version: '3.5.0' });
+  updater.downloadUpdate = async () => updater.emit('update-downloaded', { version: '3.5.0' });
+  await up.check({ install: true }); await new Promise((r) => setImmediate(r));
+  assert.equal(updater.calls.filter((c) => Array.isArray(c)).length, 0);
+  assert.match(up.summary().notice, /not installed yet: Finish or stop/);
+  assert.equal(up.installing, false);
+});
+
+test('manual check when an update is already ready installs it; no update installs nothing', async () => {
+  const { updater, up } = await ready();
+  await up.check({ install: true });
+  assert.equal(updater.calls.filter((c) => Array.isArray(c)).length, 1);
+  const m = make(); m.updater.checkForUpdates = async () => m.updater.emit('update-not-available', {});
+  await m.up.check({ install: true });
+  assert.equal(m.up.state, 'idle'); assert.equal(m.up.installWhenReady, false);
+});

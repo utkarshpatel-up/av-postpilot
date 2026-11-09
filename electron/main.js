@@ -695,7 +695,7 @@ const updater = new Updater({
 });
 ipcMain.handle('update', async (_e, { action } = {}) => {
   if (action === 'summary') return { ok: true, ...updater.summary() };
-  if (action === 'check') return updater.check();
+  if (action === 'check') return updater.check({ install: true });
   if (action === 'install') return updater.install();
   return { ok: false, error: 'Unknown update action' };
 });
