@@ -2,6 +2,7 @@ name: Build macOS distributions
 on:
   workflow_dispatch:
   push:
+    tags: ['v*']   # a release tag also attaches the DMGs to that release (path filters don't apply to tags)
     branches: [main]
     paths:
       - 'electron/**'
@@ -17,9 +18,15 @@ jobs:
   mac:
     runs-on: macos-15
     permissions:
-      contents: write   # to create the draft release holding the DMGs
+      contents: write   # to create the draft release / upload to the tag's release
     steps:
       - uses: actions/checkout@v4
+      - name: Tag must match package.json version
+        if: github.ref_type == 'tag'
+        run: |
+          version=$(node -p "require('./package.json').version")
+          tag="${{ github.ref_name }}"
+          [ "$tag" = "v$version" ] || { echo "Tag $tag does not match version $version"; exit 1; }
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -57,6 +64,7 @@ jobs:
       # artifact: release files don't count against the account's artifact storage
       # quota, which 190 MB builds filled. Download into dist/, then delete the draft.
       - name: Put the DMGs in a draft release
+        if: github.ref_type != 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -66,3 +74,19 @@ jobs:
             --draft --target "$GITHUB_SHA" \
             --title "Mac build $version (${GITHUB_SHA::7})" \
             --notes "macOS DMGs of $version for dist/. Download, then delete this draft."
+      # The Windows workflow creates the public release for the tag (electron-builder), so wait for it
+      # instead of creating one here. Only the DMGs are added; Windows files and latest.yml are untouched.
+      - name: Attach the DMGs to the release for this tag
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ github.ref_name }}"
+          ls dist/AV-PostPilot-*-macOS-*.dmg
+          for i in $(seq 1 60); do
+            gh release view "$tag" >/dev/null 2>&1 && break
+            echo "Release $tag not created yet (attempt $i/60); waiting 30 s"
+            sleep 30
+          done
+          gh release view "$tag" >/dev/null || { echo "Release $tag still missing after 30 min; is the Windows workflow ok? Re-run this job."; exit 1; }
+          gh release upload "$tag" dist/AV-PostPilot-*-macOS-*.dmg --clobber
