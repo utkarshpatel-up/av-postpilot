@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { EventEmitter } = require('events');
-const { Updater, unsupportedReason } = require('../electron/updater');
+const { Updater, unsupportedReason, isNewer } = require('../electron/updater');
 
 function fake(over = {}) {
   const u = new EventEmitter();
@@ -203,4 +203,55 @@ test('manual check when an update is already ready installs it; no update instal
   const m = make(); m.updater.checkForUpdates = async () => m.updater.emit('update-not-available', {});
   await m.up.check({ install: true });
   assert.equal(m.up.state, 'idle'); assert.equal(m.up.installWhenReady, false);
+});
+
+// ---- notify-only (portable ZIP / macOS): checks GitHub, never installs
+const notify = (fetchLatest, extra = {}) => { const changes = []; return { changes, up: new Updater({ updater: null, version: '3.4.5', reason: 'portable', fetchLatest, onChange: (s) => changes.push(s.state), ...extra }) }; };
+
+test('isNewer compares x.y.z numerically', () => {
+  assert.equal(isNewer('v3.10.0', '3.9.9'), true);
+  assert.equal(isNewer('3.9.9', 'v3.10.0'), false);
+  assert.equal(isNewer('v3.4.5', '3.4.5'), false);
+  assert.equal(isNewer('3.4.6-beta.1', '3.4.5'), true);
+  assert.equal(isNewer('garbage', '3.4.5'), false);
+});
+
+test('notify-only: newer release -> available with releaseUrl, cannot install', async () => {
+  const { up, changes } = notify(async () => ({ version: 'v3.5.0', url: 'https://github.com/x/releases/tag/v3.5.0' }));
+  assert.equal(up.state, 'idle');
+  assert.equal((await up.check()).ok, true);
+  const s = up.summary();
+  assert.deepEqual(changes, ['checking', 'available']);
+  assert.equal(s.state, 'available'); assert.equal(s.available, '3.5.0');
+  assert.equal(s.releaseUrl, 'https://github.com/x/releases/tag/v3.5.0');
+  assert.equal(s.canCheck, true); assert.equal(s.enabled, false);
+  assert.equal(up.install().ok, false);
+});
+
+test('notify-only: same or older version -> idle with checkedAt', async () => {
+  for (const v of ['v3.4.5', '3.3.0']) {
+    const { up } = notify(async () => ({ version: v, url: 'u' }));
+    await up.check();
+    assert.equal(up.state, 'idle'); assert.ok(up.checkedAt); assert.equal(up.summary().releaseUrl, '');
+  }
+});
+
+test('notify-only: fetch failure -> error', async () => {
+  const { up } = notify(async () => { throw new Error('offline'); });
+  assert.equal((await up.check()).ok, false);
+  assert.equal(up.state, 'error'); assert.equal(up.error, 'offline');
+});
+
+test('reason without fetchLatest stays disabled and refuses check', async () => {
+  const { up } = notify(null);
+  assert.equal(up.state, 'disabled');
+  assert.equal(up.summary().canCheck, false);
+  assert.equal((await up.check()).ok, false);
+});
+
+test('notify-only start() schedules the periodic check', () => {
+  const calls = [];
+  const { up } = notify(async () => ({ version: '3.4.5', url: 'u' }), { timers: { setTimeout: () => { calls.push('t'); }, setInterval: () => { calls.push('i'); } } });
+  up.start();
+  assert.deepEqual(calls, ['t', 'i']);
 });

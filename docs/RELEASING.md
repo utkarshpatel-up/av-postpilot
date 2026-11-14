@@ -25,5 +25,5 @@ updates are verified against the SHA-512 recorded in it. Do not remove or rename
 
 ## Limits
 - Copies installed **before** this feature (3.3.1 and older) must be upgraded once by hand with the new Setup installer.
-- Portable ZIP, development runs and macOS do not auto-update (the Mac app is ad-hoc signed; updates need an Apple Developer ID). They show why in Settings → Updates.
+- Portable ZIP and macOS do not auto-install (the Mac app is ad-hoc signed; updates need an Apple Developer ID). They still check GitHub for the latest release and, if newer, announce it in Settings → Updates with a Download button that opens the release page. Development runs have updates fully off.
 - Windows builds are unsigned, so SmartScreen may warn on a manual download; auto-updates still check the SHA-512.
