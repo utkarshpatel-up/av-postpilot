@@ -1,4 +1,4 @@
-# Releasing a Windows update
+# Releasing an update
 
 Installed copies (the Windows **Setup** installer) update themselves from GitHub releases of
 `utkarshpatel-up/av-postpilot`. They check 30 seconds after start and every 4 hours, download in the
@@ -13,6 +13,10 @@ and installing is refused while a job is running or Feedback Cutter audio is uns
    `AV-PostPilot-<version>-Windows-Setup.exe`, `AV-PostPilot-<version>-Windows-Setup.exe.blockmap`, `latest.yml`,
    plus `AV-PostPilot-<version>-Windows-Portable.zip` (built every time; it does not auto-update).
    To add a ZIP to an older tag: run the workflow manually (Actions → Publish Windows release → tag).
+4. The same tag also runs **Build macOS distributions**, which checks the tag, builds and verifies the Mac
+   app, waits for the release from step 3 to exist, then attaches `AV-PostPilot-<version>-macOS-arm64.dmg`
+   and `AV-PostPilot-<version>-macOS-x64.dmg` (it never creates the release or touches the Windows files).
+   If it timed out (30 min), re-run that job.
 
 By hand instead (Windows, with Python for the audio engine; `GH_TOKEN` = a token with repo contents write):
 ```
