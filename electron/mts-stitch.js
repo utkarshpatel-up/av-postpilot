@@ -41,14 +41,53 @@ function listClips(streamDir) {
     .sort((a, b) => a.num - b.num);
 }
 
-// shortcut: "full segment" is guessed from size (camera cuts at a fixed limit); upgrade: read BDMV/PLAYLIST/*.MPL for exact segment lists.
-function groupRecordings(clips, { splitMinBytes = SPLIT_MIN_BYTES, maxGapMs = MAX_GAP_MS } = {}) {
+// AVCHD playlists (BDMV/PLAYLIST/*.MPL, Blu-ray MPLS layout) say exactly which clip continues which:
+// a PlayItem whose connection_condition is 5 or 6 joins seamlessly onto the PlayItem before it.
+// Returns Map(clip number -> number of the clip it continues), or null when there is no readable playlist.
+function parseMpl(buf) {
+  if (buf.length < 12 || buf.toString('ascii', 0, 4) !== 'MPLS') return null;
+  const start = buf.readUInt32BE(8);
+  if (start + 10 > buf.length) return null;
+  const items = [];
+  let p = start + 10;
+  for (let i = buf.readUInt16BE(start + 6); i > 0; i--) {
+    if (p + 13 > buf.length) return null;
+    const name = buf.toString('ascii', p + 2, p + 7);
+    if (!/^\d{5}$/.test(name)) return null;
+    items.push({ num: parseInt(name, 10), cc: buf[p + 12] & 0x0f });
+    p += 2 + buf.readUInt16BE(p);
+  }
+  return items;
+}
+function readPlaylist(streamDir) {
+  const dir = child(path.dirname(path.resolve(streamDir)), 'PLAYLIST');
+  if (!dir) return null;
+  const full = path.join(path.dirname(path.resolve(streamDir)), dir);
+  const links = new Map();
+  let any = false;
+  for (const n of fs.readdirSync(full).filter((x) => /\.mpls?$/i.test(x))) {
+    let items;
+    try { items = parseMpl(fs.readFileSync(path.join(full, n))); } catch { items = null; }
+    if (!items) continue;
+    any = true;
+    items.forEach((it, i) => { if (i && (it.cc === 5 || it.cc === 6)) links.set(it.num, items[i - 1].num); else if (!links.has(it.num)) links.set(it.num, null); });
+  }
+  return any ? links : null;
+}
+
+// Clips listed in the playlist are joined exactly as it says. Clips it does not list fall back to a guess:
+// shortcut: "full segment" is guessed from size (camera cuts at a fixed limit); upgrade: only if a camera writes no playlist.
+function groupRecordings(clips, { splitMinBytes = SPLIT_MIN_BYTES, maxGapMs = MAX_GAP_MS, playlist = null } = {}) {
   const groups = [];
   let cur = null;
   for (const c of [...clips].sort((a, b) => a.num - b.num)) {
     const prev = cur && cur.clips[cur.clips.length - 1];
-    const gap = prev ? c.mtimeMs - prev.mtimeMs : 0;
-    if (prev && c.num === prev.num + 1 && prev.size >= splitMinBytes && gap > 0 && gap <= maxGapMs) {
+    let joins = false;
+    if (prev && c.num === prev.num + 1) {
+      if (playlist && playlist.has(c.num) && playlist.has(prev.num)) joins = playlist.get(c.num) === prev.num;
+      else { const gap = c.mtimeMs - prev.mtimeMs; joins = prev.size >= splitMinBytes && gap > 0 && gap <= maxGapMs; }
+    }
+    if (joins) {
       cur.clips.push(c);
       cur.totalSize += c.size;
     } else {
@@ -57,6 +96,14 @@ function groupRecordings(clips, { splitMinBytes = SPLIT_MIN_BYTES, maxGapMs = MA
     }
   }
   return groups;
+}
+
+// One call for the UI: card root or STREAM folder in, recordings out.
+function scan(dir, opts = {}) {
+  const stream = findStream(dir);
+  const clips = listClips(stream);
+  const playlist = readPlaylist(stream);
+  return { stream, clips, usedPlaylist: Boolean(playlist), groups: groupRecordings(clips, { ...opts, playlist }) };
 }
 
 const within = (parent, p) => { const r = path.relative(parent, p); return r === '' || (!r.startsWith('..') && !path.isAbsolute(r)); };
@@ -86,11 +133,14 @@ async function stitch(group, destDir, { onProgress, signal, overwrite = false } 
   if (fsStat.bavail * fsStat.bsize < total) throw new Error(`Not enough free space in ${destDir} (need ${(total / GIB).toFixed(2)} GiB).`);
 
   let done = 0;
+  let lastPercent = -1;
   async function* chunks() {
     for (const clip of clips) {
       for await (const buf of fs.createReadStream(clip.path)) {
         done += buf.length;
-        if (onProgress) onProgress({ done, total, percent: total ? Math.min(100, (done / total) * 100) : 100, clip: clip.name });
+        // report each whole percent only: an 8 GB recording is ~130k chunks
+        const percent = total ? Math.min(100, Math.floor((done / total) * 100)) : 100;
+        if (onProgress && percent !== lastPercent) { lastPercent = percent; onProgress({ done, total, percent, clip: clip.name }); }
         yield buf;
       }
     }
@@ -123,4 +173,4 @@ async function stitchAll(groups, destDir, { includeSingles = false, ...opts } = 
   return results;
 }
 
-module.exports = { findStream, listClips, groupRecordings, stitch, stitchAll, SPLIT_MIN_BYTES, MAX_GAP_MS };
+module.exports = { findStream, listClips, parseMpl, readPlaylist, groupRecordings, scan, stitch, stitchAll, SPLIT_MIN_BYTES, MAX_GAP_MS };

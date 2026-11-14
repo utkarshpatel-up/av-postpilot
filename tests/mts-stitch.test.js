@@ -93,3 +93,56 @@ test('stitch: abort removes .part; stitchAll skips singles and reports', async (
   assert.strictEqual(res2.length, 2);
   assert.deepStrictEqual(fs.readdirSync(dest).sort(), ['00001_Full.MTS', '00004_Full.MTS']);
 });
+
+// Minimal MPLS: header (start of PlayList at byte 8), PlayList with PlayItems [clip number, connection_condition].
+function mpl(items) {
+  const pis = items.map(([num, cc]) => {
+    const b = Buffer.alloc(2 + 20);
+    b.writeUInt16BE(20, 0);
+    b.write(String(num).padStart(5, '0'), 2, 'ascii');
+    b.write('M2TS', 7, 'ascii');
+    b[12] = cc;
+    return b;
+  });
+  const head = Buffer.alloc(40);
+  head.write('MPLS0100', 0, 'ascii');
+  head.writeUInt32BE(40, 8);
+  const pl = Buffer.alloc(10);
+  pl.writeUInt16BE(items.length, 6);
+  return Buffer.concat([head, pl, ...pis]);
+}
+
+test('parseMpl: reads clips and connection conditions, rejects junk', () => {
+  assert.deepStrictEqual(m.parseMpl(mpl([[85, 1], [86, 6], [87, 5]])), [{ num: 85, cc: 1 }, { num: 86, cc: 6 }, { num: 87, cc: 5 }]);
+  assert.strictEqual(m.parseMpl(Buffer.from('not a playlist')), null);
+  assert.strictEqual(m.parseMpl(mpl([[85, 1]]).subarray(0, 50)), null); // truncated
+});
+
+test('scan: playlist decides, beats the size guess both ways', () => {
+  // 85+86 are small (size guess would split them) but the playlist joins them;
+  // 87+88 are big and close (size guess would join them) but the playlist says 88 is a new recording.
+  const { root, stream } = card([['00085.MTS', 10, T0], ['00086.MTS', 10, T0 + 60], ['00087.MTS', 200, T0 + 120], ['00088.MTS', 200, T0 + 180], ['00089.MTS', 10, T0 + 240]]);
+  const plDir = path.join(path.dirname(stream), 'PLAYLIST');
+  fs.mkdirSync(plDir);
+  fs.writeFileSync(path.join(plDir, '00000.MPL'), mpl([[85, 1], [86, 6], [87, 1], [88, 1]]));
+  const r = m.scan(root, O);
+  assert.strictEqual(r.usedPlaylist, true);
+  // 89 is not in the playlist: size guess, and 88 is "full" (200 >= 100) and close, so it joins 88
+  assert.deepStrictEqual(r.groups.map((g) => g.clips.map((c) => c.num)), [[85, 86], [87], [88, 89]]);
+});
+
+test('scan: no playlist falls back to the size guess', () => {
+  const { root } = card([['00001.MTS', 120, T0], ['00002.MTS', 10, T0 + 60]]);
+  const r = m.scan(root, O);
+  assert.strictEqual(r.usedPlaylist, false);
+  assert.deepStrictEqual(r.groups.map((g) => g.clips.length), [2]);
+});
+
+test('stitch: progress is reported once per whole percent', async () => {
+  const { stream } = card([['00001.MTS', 3 * 1024 * 1024, T0], ['00002.MTS', 1024, T0 + 60]]);
+  const [g] = m.groupRecordings(m.listClips(stream), O);
+  const seen = [];
+  await m.stitch(g, tmp(), { onProgress: (p) => seen.push(p.percent) });
+  assert.strictEqual(new Set(seen).size, seen.length);
+  assert.strictEqual(seen[seen.length - 1], 100);
+});
