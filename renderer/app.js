@@ -1516,31 +1516,40 @@ pilot.onLibraryBackup(() => { if ($('page-librarybackup').classList.contains('ac
 setInterval(() => { if (settings && $('page-librarybackup').classList.contains('active')) refreshLibraryStatus(); }, 30000);
 
 // ------------------------------------------------------------------ updates
+let updState = '';
 function renderUpdate(u) {
+  updState = u.state;
   const text = {
-    disabled: `Version ${u.version}. ${u.reason}`,
-    idle: u.checkedAt ? `Version ${u.version}. You have the latest version (checked ${new Date(u.checkedAt).toLocaleTimeString()}).` : `Version ${u.version}. Not checked yet.`,
-    checking: `Version ${u.version}. Checking for updates…`,
-    downloading: `Downloading version ${u.available}… ${u.percent}%`,
-    ready: u.installing ? (u.quitBlocked ? `The update to ${u.available} is waiting to install: finish or stop the running operation, then press Quit to finish update.` : `Installing version ${u.available}… PostPilot is restarting.`) : `Version ${u.available} is ready. Restart to install it.`,
-    error: `Version ${u.version}. Update problem: ${u.error}`,
+    disabled: `Version ${u.version}.`,
+    available: `Version ${u.available} available.`,
+    idle: u.checkedAt ? `Up to date (${u.version}).` : `Version ${u.version}.`,
+    checking: 'Checking…',
+    downloading: `Downloading ${u.available}… ${u.percent}%`,
+    ready: u.installing ? (u.quitBlocked ? `Update ${u.available} waiting to install.` : `Installing ${u.available}… restarting.`) : `Version ${u.available} ready.`,
+    error: 'Update check failed.',
   }[u.state];
+  const detail = {
+    available: u.reason, error: u.error, // other states keep the long reason in the tooltip: the sidebar is narrow
+    ready: u.quitBlocked ? 'Finish or stop the running operation, then press Quit to finish update.' : '',
+  }[u.state];
+  $('upd-note').textContent = [u.notice, detail].filter(Boolean).join(' ');
   $('upd-status').textContent = text;
+  $('upd-status').title = u.reason || '';
   $('upd-bar').classList.toggle('hidden', u.state !== 'downloading');
   $('upd-bar').value = u.percent;
-  $('upd-check').textContent = u.state === 'error' ? 'Retry' : 'Check for updates';
-  $('upd-check').disabled = !u.enabled || ['checking', 'downloading', 'ready'].includes(u.state);
-  $('upd-install').classList.toggle('hidden', u.state !== 'ready');
+  $('upd-check').textContent = u.state === 'error' ? 'Retry' : u.checkedAt ? 'Check again' : 'Check for updates';
+  $('upd-check').title = u.enabled ? 'Looks for a newer version and, if there is one, installs it and restarts PostPilot' : 'Looks for a newer version and tells you where to download it';
+  $('upd-check').disabled = !u.canCheck || ['checking', 'downloading', 'ready'].includes(u.state);
+  $('upd-install').classList.toggle('hidden', u.state !== 'ready' && u.state !== 'available');
   $('upd-install').disabled = Boolean(u.installing && !u.quitBlocked);
-  $('upd-install').textContent = u.quitBlocked ? 'Quit to finish update' : 'Restart to install';
+  $('upd-install').textContent = u.state === 'available' ? 'Download' : u.quitBlocked ? 'Quit to finish update' : 'Restart to install';
 }
 $('upd-check').addEventListener('click', () => pilot.update('check'));
-$('upd-check').title = 'Looks for a newer version and, if there is one, installs it and restarts PostPilot';
 $('upd-install').addEventListener('click', async () => {
-  const r = await pilot.update('install');
+  const r = await pilot.update(updState === 'available' ? 'open-download' : 'install');
   $('upd-note').textContent = r.ok ? '' : r.error;
 });
-pilot.onUpdate((u) => { $('upd-note').textContent = u.notice; renderUpdate(u); });
+pilot.onUpdate(renderUpdate);
 
 (async () => {
   const init = await pilot.getInitial();
@@ -1555,8 +1564,7 @@ pilot.onUpdate((u) => { $('upd-note').textContent = u.notice; renderUpdate(u); }
   pcName = init.pc;
   logEntries = init.log;
   $('pc-name').textContent = init.pc;
-  renderUpdate(init.update); $('upd-note').textContent = init.update.notice;
-  $('app-version').textContent = `v${init.version}`;
+  renderUpdate(init.update);
   $('s-about').textContent = `AV PostPilot v${init.version} · this PC: ${init.pc}`;
   renderDashboard();
   renderAutosaveForm();

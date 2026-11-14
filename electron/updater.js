@@ -14,17 +14,28 @@ function unsupportedReason({ platform = process.platform, isPackaged, execPath =
   if (platform === 'darwin') return 'Automatic updates are not available on macOS yet (the app is not signed with an Apple Developer ID). Download the new DMG from the releases page.';
   if (platform !== 'win32') return 'Automatic updates are only available in the Windows installer.';
   if (env.PORTABLE_EXECUTABLE_FILE || !exists(path.join(path.dirname(execPath), `Uninstall ${path.basename(execPath, '.exe')}.exe`)) || !exists(path.join(resourcesPath || '', 'app-update.yml'))) {
-    return 'This is the portable (ZIP) copy, which cannot update itself. Download the newest Windows-Portable.zip from the releases page and unzip it, or install the Windows Setup to get automatic updates.';
+    return 'This is the portable (ZIP) copy, which cannot install updates itself. Download the newest Windows-Portable.zip from the releases page and unzip it, or install the Windows Setup to get automatic updates.';
   }
   return '';
 }
 
+// x.y.z > x.y.z (leading v and any -prerelease/+build suffix ignored; bad input compares as 0.0.0).
+function isNewer(a, b) {
+  const n = (v) => String(v || '').replace(/^v/i, '').split(/[-+]/)[0].split('.').map((x) => parseInt(x, 10) || 0);
+  const [x, y] = [n(a), n(b)];
+  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0);
+  return false;
+}
+
 class Updater {
   // deps: updater (electron-updater's autoUpdater), version, reason ('' = supported), busy() -> '' or why not now,
+  //       fetchLatest() -> { version, url } (only used when reason is set: notify-only check, no install),
   //       onChange(summary), log(level, msg), timers { setTimeout, setInterval }
-  constructor({ updater, version, reason = '', busy = () => '', onChange = () => {}, quit = () => {}, log = () => {}, timers = { setTimeout, setInterval } }) {
-    Object.assign(this, { updater, version, reason, busy, onChange, quit, log, timers });
-    this.state = reason ? 'disabled' : 'idle';   // disabled | idle | checking | downloading | ready | error
+  constructor({ updater, version, reason = '', fetchLatest = null, busy = () => '', onChange = () => {}, quit = () => {}, log = () => {}, timers = { setTimeout, setInterval } }) {
+    Object.assign(this, { updater, version, reason, fetchLatest, busy, onChange, quit, log, timers });
+    // disabled | idle | checking | available (notify-only: newer release exists, user downloads it) | downloading | ready | error
+    this.state = reason && !fetchLatest ? 'disabled' : 'idle';
+    this.releaseUrl = '';
     this.available = ''; this.percent = 0; this.error = ''; this.checkedAt = null; this.installing = false;
     if (reason) return;
     Object.assign(updater, { autoDownload: false, autoInstallOnAppQuit: false, allowPrerelease: false, allowDowngrade: false });
@@ -39,8 +50,8 @@ class Updater {
   }
 
   summary() {
-    const { state, version, available, percent, error, checkedAt, reason, installing, quitBlocked, notice } = this;
-    return { state, version, available, percent, error, checkedAt, reason, installing, quitBlocked: Boolean(quitBlocked), notice: notice || '', enabled: !this.reason };
+    const { state, version, available, percent, error, checkedAt, reason, installing, quitBlocked, notice, releaseUrl } = this;
+    return { state, version, available, percent, error, checkedAt, reason, installing, quitBlocked: Boolean(quitBlocked), notice: notice || '', enabled: !this.reason, canCheck: !this.reason || Boolean(this.fetchLatest), releaseUrl: releaseUrl || '' };
   }
   set(state, extra = {}) { Object.assign(this, { state, error: '' }, extra); this.onChange(this.summary()); }
   fail(err) {
@@ -57,7 +68,7 @@ class Updater {
 
   // Start the periodic checks (first one shortly after launch, so startup stays quiet).
   start() {
-    if (this.reason || this.started) return;
+    if ((this.reason && !this.fetchLatest) || this.started) return;
     this.started = true;
     this.timers.setTimeout(() => this.check(), FIRST_CHECK_MS)?.unref?.();
     this.timers.setInterval(() => this.check(), EVERY_MS)?.unref?.();
@@ -66,7 +77,7 @@ class Updater {
   // Check, and download what is found. Never overlaps with a running check/download or a ready update.
   // install: the user pressed the button, so a found update is installed without a second click.
   async check({ install = false } = {}) {
-    if (this.reason) return { ok: false, error: this.reason };
+    if (this.reason) return this.fetchLatest ? this.checkNotifyOnly() : { ok: false, error: this.reason };
     this.notice = '';
     if (install) this.installWhenReady = true;
     if (this.state === 'ready' && install) { this.autoInstall(); return { ok: true, ...this.summary() }; }
@@ -76,6 +87,19 @@ class Updater {
     // checkForUpdates resolved with no event at all (e.g. a feed that is not published yet)
     if (this.state === 'checking') this.set('idle', { checkedAt: Date.now() });
     if (this.state !== 'ready' && this.state !== 'downloading') this.installWhenReady = false;
+    return { ok: this.state !== 'error', ...this.summary() };
+  }
+
+  // Portable/macOS copies: look up the latest release and tell the user; never download or install.
+  async checkNotifyOnly() {
+    this.notice = '';
+    if (this.state === 'checking') return { ok: true, ...this.summary() };
+    this.set('checking');
+    try {
+      const { version, url } = await this.fetchLatest();
+      if (isNewer(version, this.version)) this.set('available', { available: String(version).replace(/^v/i, ''), releaseUrl: url, checkedAt: Date.now() });
+      else this.set('idle', { available: '', releaseUrl: '', checkedAt: Date.now() });
+    } catch (err) { this.fail(err); }
     return { ok: this.state !== 'error', ...this.summary() };
   }
 
@@ -124,4 +148,4 @@ function installGate(channel, args) {
   return { ok: false, error: 'AV PostPilot is restarting to install an update. Wait a moment, then try again.' };
 }
 
-module.exports = { installGate, Updater, unsupportedReason, FIRST_CHECK_MS, EVERY_MS };
+module.exports = { installGate, Updater, isNewer, unsupportedReason, FIRST_CHECK_MS, EVERY_MS };

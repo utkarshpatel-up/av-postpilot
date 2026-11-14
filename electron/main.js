@@ -685,9 +685,18 @@ function updateBusyReason() {
   return '';
 }
 const updateReason = unsupportedReason({ isPackaged: app.isPackaged });
+const RELEASES = 'https://github.com/utkarshpatel-up/av-postpilot/releases/';
+// Portable/macOS builds cannot self-install, but can still learn that a newer release exists.
+async function fetchLatestRelease() {
+  const res = await fetch('https://api.github.com/repos/utkarshpatel-up/av-postpilot/releases/latest', { headers: { 'User-Agent': 'AV-PostPilot', Accept: 'application/vnd.github+json' }, signal: AbortSignal.timeout(15000) });
+  if (!res.ok) throw new Error(`Could not check for updates (GitHub answered ${res.status})`);
+  const r = await res.json();
+  return { version: r.tag_name, url: r.html_url };
+}
 const updater = new Updater({
   version: app.getVersion(),
   reason: updateReason,
+  fetchLatest: app.isPackaged ? fetchLatestRelease : null,
   updater: updateReason ? null : require('electron-updater').autoUpdater,
   busy: updateBusyReason,
   onChange: (s) => send('update', s),
@@ -698,6 +707,12 @@ ipcMain.handle('update', async (_e, { action } = {}) => {
   if (action === 'summary') return { ok: true, ...updater.summary() };
   if (action === 'check') return updater.check({ install: true });
   if (action === 'install') return updater.install();
+  if (action === 'open-download') {
+    const url = String(updater.releaseUrl || '');
+    if (!url.startsWith(RELEASES)) return { ok: false, error: 'No download page is known yet' };
+    await shell.openExternal(url);
+    return { ok: true };
+  }
   return { ok: false, error: 'Unknown update action' };
 });
 ipcMain.handle('get-initial', () => ({
