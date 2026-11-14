@@ -75,9 +75,12 @@ class MediaPreview {
     // no -r: the frame rate and timing stay the source's
     const args = ['-i', file, '-o', part, '-f', 'av_mp4', '-e', 'x264', '--encoder-preset', 'ultrafast', '-q', '30',
       '--maxWidth', '960', '--maxHeight', '540', '-E', 'av_aac', '-B', '96', '--mixdown', 'stereo', '--no-markers'];
-    let last = -1;
+    // HandBrakeCLI's output can arrive a few bytes at a time, splitting progress lines between
+    // chunks: look in the recent output, not just the newest chunk.
+    let last = -1, recent = '';
     const r = await this.run(args, (s) => {
-      const m = [...s.matchAll(/Encoding: task \d+ of \d+, ([\d.]+) %/g)].pop();
+      recent = (recent + s).slice(-500);
+      const m = [...recent.matchAll(/Encoding: task \d+ of \d+, ([\d.]+) %/g)].pop();
       if (m && Math.floor(m[1]) !== last) { last = Math.floor(m[1]); onProgress(last); }
     });
     this.child = null;

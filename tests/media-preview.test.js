@@ -19,6 +19,26 @@ test('the built-in HandBrakeCLI is used before any other copy, unless one was ch
   assert.strictEqual(findCli(chosen, { PATH: '' }), chosen);
 });
 
+test('preview progress is read even when HandBrakeCLI prints it a byte at a time', async () => {
+  const { EventEmitter } = require('events');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pv-'));
+  const src = path.join(dir, 'clip.mov');
+  fs.writeFileSync(src, 'v');
+  const spawn = (cli, args) => {
+    const child = new EventEmitter(); child.stdout = new EventEmitter(); child.stderr = new EventEmitter(); child.kill = () => {};
+    setImmediate(() => {
+      for (const ch of '\rEncoding: task 1 of 1, 0.00 %\rEncoding: task 1 of 1, 48.76 %[x264] noise\r\n\rEncoding: task 1 of 1, 100.00 %') child.stdout.emit('data', ch);
+      fs.writeFileSync(args[args.indexOf('-o') + 1], 'mp4');
+      child.emit('close', 0);
+    });
+    return child;
+  };
+  const mp = new MediaPreview({ dir, findCli: () => 'HandBrakeCLI', spawn });
+  const seen = [];
+  await mp.make(src, (p) => seen.push(p));
+  assert.deepStrictEqual(seen, [0, 48, 100]);
+});
+
 // A real file to try: the HDR sample that comes with Windows (VP9, 11 s).
 const SAMPLE = path.join(process.env.SystemRoot || 'C:\Windows', 'SystemResources', 'Windows.UI.SettingsAppThreshold', 'SystemSettings', 'Assets', 'HDRSample.mkv');
 test('probe and preview copy through the built-in HandBrakeCLI', { skip: (!bundledCli() || !fs.existsSync(SAMPLE)) && 'needs the built-in HandBrakeCLI and a sample file', timeout: 120000 }, async () => {

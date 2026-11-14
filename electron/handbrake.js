@@ -359,7 +359,7 @@ class HandBrake {
       const log = (text) => { if (logFile) try { fs.appendFileSync(logFile, text); } catch { /* the report still has the rest */ } };
       log(`HandBrakeCLI: ${cli}\nPreset: ${preset} (${presetFile})\nCommand: ${command}\n\n`);
       const causes = [], tailLines = [];
-      let partial = { out: '', err: '' }, lastProgress = 0, last = 0, gpu = '', tail = '';
+      let partial = { out: '', err: '' }, lastProgress = 0, last = 0, gpu = '', tail = '', recentOut = '';
       const CAUSE = /\berror\b|fail|invalid|cannot|can't|unable|unsupported|not support|minimum required|not found|no such|no title|denied|nvcuda|out of memory/i;
       const line = (l) => {
         l = l.trim();
@@ -379,7 +379,9 @@ class HandBrake {
       };
       const onOut = (buf) => {
         // "Encoding: task 1 of 1, 45.12 % (80.1 fps, avg 82.3 fps, ETA 00h03m10s)"
-        const m = [...String(buf).matchAll(/Encoding: task (\d+) of (\d+), ([\d.]+) %(?:.*?ETA (\d+)h(\d+)m(\d+)s)?/g)].pop();
+        // The output can arrive a few bytes at a time, splitting this line: look in the recent output.
+        recentOut = (recentOut + buf).slice(-500);
+        const m = [...recentOut.matchAll(/Encoding: task (\d+) of (\d+), ([\d.]+) %(?:.*?ETA (\d+)h(\d+)m(\d+)s)?/g)].pop();
         if (!m) return;
         const [, task, tasks, pct, h, mi, s] = m;
         item.pct = Math.min(100, ((Number(task) - 1) + Number(pct) / 100) / Number(tasks) * 100);

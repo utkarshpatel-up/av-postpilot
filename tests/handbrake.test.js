@@ -181,6 +181,26 @@ test('long paths: input read through a short junction, output via a short tempor
   assert.ok(fs.existsSync(item.dest) && !fs.existsSync(calls[0][3]));
 });
 
+test('progress and ETA are read even when HandBrakeCLI prints them a byte at a time', async () => {
+  const root = tree({ 'out/.keep': '' });
+  const out = path.join(root, 'out', 'a.mp4');
+  let child;
+  const spawn = () => {
+    child = new EventEmitter(); child.stdout = new EventEmitter(); child.stderr = new EventEmitter(); child.kill = () => {};
+    return child;
+  };
+  const hb = new HandBrake({ getSettings: () => ({}), log: () => {}, spawn });
+  const item = { id: 1 };
+  const done = hb.encode(item, 'HandBrakeCLI', 'p.json', 'P', 'in.mov', out);
+  for (const ch of '\rEncoding: task 1 of 2, 10.00 %\rEncoding: task 1 of 2, 50.00 % (80 fps, avg 80 fps, ETA 00h01m05s)\r') child.stdout.emit('data', ch);
+  assert.strictEqual(item.pct, 25);
+  assert.strictEqual(item.eta, 65);
+  fs.writeFileSync(out, 'v');
+  child.emit('close', 0);
+  await done;
+  assert.strictEqual(item.pct, 100);
+});
+
 test('a preset for a graphics card this PC lacks gets a clear message', async () => {
   const root = tree({ 'In/Cam-01/a.MOV': 'v', 'Preset/p.json': INPUT['Preset/p.json'], 'cli/HandBrakeCLI': '' });
   const cfg = { inputDir: path.join(root, 'In'), outputDir: path.join(root, 'Out'), presetFile: path.join(root, 'Preset/p.json'), cliPath: path.join(root, 'cli/HandBrakeCLI'), convertSatsangs: true };
