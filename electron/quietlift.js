@@ -51,7 +51,9 @@ class QuietLift {
       });
       // Exiting before "ready" (e.g. numpy missing) must fail the waiting calls, not leave them hanging.
       proc.on('exit', (code) => {
-        const err = new Error(`${this.name} engine stopped (code ${code}). ${lastLine(stderr)}`.trim());
+        // Run from source without the built-in engine: Python on PATH lacks the packages. Say how to get the engine.
+        const hint = !exe && /ModuleNotFoundError/.test(stderr) ? ' The built-in audio engine is not built in this copy: run "npm run build-feedback-engine", then restart.' : '';
+        const err = new Error(`${this.name} engine stopped (code ${code}). ${lastLine(stderr)}${hint}`.trim());
         reject(err);
         if (this.proc !== proc) return;   // stopped on purpose: stop() already answered its calls
         this.proc = null;
