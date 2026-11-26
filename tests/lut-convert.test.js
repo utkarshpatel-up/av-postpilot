@@ -56,6 +56,8 @@ test("HandBrake's H.265 1080p30 preset becomes x265 10-bit at RF 22, fitted into
     'scale=1920:1080:in_color_matrix=bt709:in_range=tv:flags=lanczos+accurate_rnd+full_chroma_int', 'format=gbrp16le',
     'lut3d=file=lut.cube:interp=tetrahedral',
     'scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int', 'format=yuv420p10le',
+    // on the frames: FFmpeg 7.1 ignores -color_primaries/-color_trc and writes "unknown" without this
+    'setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=bt709',
   ].join(','));
   assert.strictEqual(after(args, '-c:v'), 'libx265');
   assert.strictEqual(after(args, '-crf'), '22');
@@ -76,9 +78,9 @@ test('NVENC, Quick Sync, AMD and VideoToolbox get their own quality and speed op
   const p = { ...H265_1080, VideoOptionExtra: '', VideoProfile: 'auto', PictureCropMode: 2, VideoQualitySlider: 30 };
   const nv = ffmpegArgs(describePreset({ ...p, VideoEncoder: 'nvenc_h265', VideoPreset: 'slower' }), parseProbe(XAVC), { input: 'i', output: 'o', lut: LUT });
   assert.deepStrictEqual(nv.slice(nv.indexOf('-c:v'), nv.indexOf('-c:v') + 10), ['-c:v', 'hevc_nvenc', '-rc', 'vbr', '-cq', '30', '-b:v', '0', '-preset', 'p6']);
-  assert.match(vf(nv), /format=yuv420p$/);
+  assert.match(vf(nv), /format=yuv420p,setparams=/);
   const nv10 = ffmpegArgs(describePreset({ ...p, VideoEncoder: 'nvenc_h265_10bit' }), parseProbe(XAVC), { input: 'i', output: 'o', lut: LUT });
-  assert.match(vf(nv10), /format=p010le$/);
+  assert.match(vf(nv10), /format=p010le,setparams=/);
   const qsv = describePreset({ ...p, VideoEncoder: 'qsv_h265', VideoPreset: 'quality' });
   assert.deepStrictEqual([qsv.speed, after(ffmpegArgs(qsv, parseProbe(XAVC), { input: 'i', output: 'o', lut: LUT }), '-global_quality')], ['veryslow', '30']);
   const amf = ffmpegArgs(describePreset({ ...p, VideoEncoder: 'vce_h265', VideoPreset: 'balanced' }), parseProbe(XAVC), { input: 'i', output: 'o', lut: LUT });
