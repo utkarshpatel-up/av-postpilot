@@ -215,8 +215,11 @@ function ffmpegArgs(d, probe, { input, output, lut }) {
   const sizeOpt = fit ? `${fit.w}:${fit.h}:` : !w && d.maxW && d.maxH ? `w='min(iw,${d.maxW})':h='min(ih,${d.maxH})':force_original_aspect_ratio=decrease:force_divisible_by=2:` : '';
   vf.push(`scale=${sizeOpt}in_color_matrix=${matrix}:in_range=${v.range || 'tv'}:flags=lanczos+accurate_rnd+full_chroma_int`, 'format=gbrp16le');
   vf.push(lut.kind === '1d' ? `lut1d=file=${lut.name}:interp=linear` : `lut3d=file=${lut.name}:interp=tetrahedral`);
-  // A LUT's output is Rec.709 video: convert back with that matrix and tag the file to match
-  vf.push('scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int', `format=${outPixFmt(d.family, d.bits)}`);
+  // A LUT's output is Rec.709 video: convert back with that matrix and tag the file to match. The tags
+  // go on the frames (setparams): FFmpeg 7.1, the one PostPilot ships, takes them from the frames and
+  // ignores -color_primaries/-color_trc, leaving "bt709/unknown/unknown" for an untagged source.
+  vf.push('scale=out_color_matrix=bt709:out_range=tv:flags=accurate_rnd+full_chroma_int', `format=${outPixFmt(d.family, d.bits)}`,
+    'setparams=range=tv:color_primaries=bt709:color_trc=bt709:colorspace=bt709');
 
   const args = ['-hide_banner', '-nostdin', '-y', '-i', input, '-map', v.index != null ? `0:${v.index}` : '0:v:0'];
   const sources = d.tracks === 'all' ? probe.audio : probe.audio.slice(0, 1);
