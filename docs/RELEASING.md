@@ -17,7 +17,7 @@ and installing is refused while a job is running or Feedback Cutter audio is uns
 By hand instead (Windows, with Python for the audio engine; `GH_TOKEN` = a token with repo contents write):
 ```
 npm ci && npm test
-node scripts/fetch-handbrake.js win && node scripts/build-feedback-engine.js
+node scripts/fetch-handbrake.js win && node scripts/fetch-ffmpeg.js win && node scripts/build-feedback-engine.js
 npx electron-builder --win nsis --x64 --publish always
 ```
 Never publish a draft or pre-release and never upload the three files separately or edit `latest.yml`:

@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { QuietLift: Engine } = require('./quietlift');
+const { withFfmpegOnPath } = require('./ffmpeg');
 
 const DEFAULTS = { python: '', dir: '', sensitivity: 22, specDetail: 'pooled' };
 const FILES = ['dsp.py', 'feedback_bridge.py'];
@@ -72,8 +73,9 @@ function builtEngineOutdated(root = path.join(__dirname, '..')) {
 }
 
 // A Python chosen on the page wins (e.g. to try a newer dsp.py); otherwise the built-in engine.
-function createEngine({ script, workDir, getPython = () => '', getExe = bundledEngine, onLog }) {
-  return new Engine({ script, args: [workDir], name: 'Feedback Cutter', getPython, getExe: () => (getPython() ? '' : getExe()), onLog });
+// Either way dsp.py finds PostPilot's FFmpeg first on PATH (previews, non-WAV recordings).
+function createEngine({ script, workDir, getPython = () => '', getExe = bundledEngine, getEnv = () => withFfmpegOnPath(), onLog }) {
+  return new Engine({ script, args: [workDir], name: 'Feedback Cutter', getPython, getExe: () => (getPython() ? '' : getExe()), getEnv, onLog });
 }
 
 module.exports = { DEFAULTS, installScripts, jobFile, exportName, createEngine, bundledEngine, engineDir, engineExeName, engineDigest, builtEngineOutdated };

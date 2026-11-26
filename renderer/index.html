@@ -559,7 +559,7 @@
     <!-- ================================================= HandBrake Converter -->
     <section class="page" id="page-handbrake">
       <h1>HandBrake Converter</h1>
-      <p class="lead">Convert a whole satsang folder to H.265 with HandBrakeCLI and a preset exported from HandBrake. The output folder mirrors the input; other files are copied as they are. Resolve is not needed.</p>
+      <p class="lead">Convert a whole satsang folder to H.265 with HandBrakeCLI and a preset exported from HandBrake, optionally with a colour LUT. The output folder mirrors the input; other files are copied as they are. Resolve is not needed.</p>
 
       <div class="card">
         <div class="card-label">Folders</div>
@@ -584,6 +584,8 @@
         <div class="card-label">HandBrake</div>
         <div class="row"><label for="hb-preset">Preset file</label><input type="text" id="hb-preset" class="grow" placeholder="custom-preset.json exported from HandBrake (Presets → Export)"><span class="pill hidden" id="hb-preset-check"></span><button class="btn" id="hb-preset-browse">Browse…</button></div>
         <div class="row"><label>HandBrakeCLI</label><span class="grow small" id="hb-cli"></span><button class="btn" id="hb-cli-browse">Choose…</button></div>
+        <div class="row"><label for="hb-lut">LUT (optional)</label><input type="text" id="hb-lut" class="grow" placeholder="a .cube file for every video; leave empty to convert as usual"><span class="pill hidden" id="hb-lut-check"></span><button class="btn" id="hb-lut-browse">Browse…</button><button class="btn hidden" id="hb-lut-clear">Clear</button></div>
+        <p class="muted small hidden" id="hb-lut-note"></p>
       </div>
 
       <div class="card">

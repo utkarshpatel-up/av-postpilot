@@ -16,12 +16,14 @@ const { SceneQueue } = require('./scenequeue');
 const { NightQueue } = require('./nightqueue');
 const { Encoder } = require('./encoder');
 const { Updater, unsupportedReason, installGate } = require('./updater');
-const { HandBrake, DEFAULTS: HANDBRAKE_DEFAULTS, presetName: handbrakePreset, findCli: findHandbrakeCli, bundledCli } = require('./handbrake');
+const { HandBrake, DEFAULTS: HANDBRAKE_DEFAULTS, presetName: handbrakePreset, findCli: findHandbrakeCli, bundledCli, lutSummary } = require('./handbrake');
 const { MediaPreview } = require('./media-preview');
 const { handbrakeCli: handbrakePin } = require('../package.json');
 const HANDBRAKE_VERSION = (process.platform === 'win32' && handbrakePin.files.win.version) || handbrakePin.version;
 const { QuietLift, DEFAULTS: QUIET_LIFT_DEFAULTS, installScripts: installQuietLift } = require('./quietlift');
 const feedbackCutter = require('./feedbackcutter');
+const { withFfmpegOnPath } = require('./ffmpeg');
+const { readLut } = require('./lut-convert');
 const toResolve = require('./toresolve');
 const projectAudio = require('./project-audio');
 const { Stabilization } = require('./stabilization');
@@ -472,6 +474,7 @@ const quietLift = new QuietLift({
   script: installQuietLift(path.join(DATA, 'quietlift')),
   getPython: quietLiftPython,
   getExe: () => (quietLiftPython() ? '' : feedbackCutter.bundledEngine()),
+  getEnv: () => withFfmpegOnPath(),   // PostPilot's one FFmpeg, first on the engine's PATH
   exeArgs: ['quiet-lift'],
   onLog: (msg) => { log('info', `Quiet Lift: ${msg}`); send('quietlift', { log: msg }); },
 });
@@ -990,7 +993,10 @@ ipcMain.handle('handbrake', async (_e, { action, args = {} }) => {
       let preset = '', presetError = '';
       if (h.presetFile) try { preset = handbrakePreset(h.presetFile); } catch (err) { presetError = err.message; }
       const cli = findHandbrakeCli(h.cliPath);
-      return { ok: true, cli, builtIn: Boolean(cli) && cli === bundledCli(), version: HANDBRAKE_VERSION, preset, presetError, defaultReportDir: path.join(DATA, 'handbrake-reports') };
+      // The LUT, the FFmpeg that applies it and what of the preset it uses (shown under the LUT field)
+      let lut = null, lutError = '';
+      if (h.lutFile) try { lut = lutSummary(handbrake.checkLut(path.resolve(h.lutFile), h.presetFile && path.resolve(h.presetFile))); } catch (err) { lutError = err.message; }
+      return { ok: true, cli, builtIn: Boolean(cli) && cli === bundledCli(), version: HANDBRAKE_VERSION, preset, presetError, lut, lutError, defaultReportDir: path.join(DATA, 'handbrake-reports') };
     }
     if (action === 'preview') return { ok: true, ...handbrake.preview() };
     if (action === 'start') {
@@ -999,6 +1005,15 @@ ipcMain.handle('handbrake', async (_e, { action, args = {} }) => {
       return Promise.race([r, new Promise((res) => setTimeout(() => res({ ok: true, started: true }), 300))]);
     }
     if (action === 'stop') { handbrake.stop(); return { ok: true }; }
+    if (action === 'pick-lut') {
+      const r = await dialog.showOpenDialog(win, {
+        title: 'Choose a LUT for every converted video', defaultPath: args.current || undefined, properties: ['openFile'],
+        filters: [{ name: 'LUT (.cube)', extensions: ['cube'] }],
+      });
+      if (r.canceled) return { ok: true, path: null };
+      readLut(r.filePaths[0]);   // throws if FFmpeg couldn't use it
+      return { ok: true, path: r.filePaths[0] };
+    }
     if (action === 'pick-preset' || action === 'pick-cli') {
       const preset = action === 'pick-preset';
       const r = await dialog.showOpenDialog(win, {

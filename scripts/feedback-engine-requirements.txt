@@ -1,8 +1,8 @@
 # Feedback Cutter engine, frozen into vendor/feedback-engine by scripts/build-feedback-engine.js.
-# Same versions as the Feedback Cutter project's tested environment.
+# Same versions as the Feedback Cutter project's tested environment. FFmpeg is not here: the app ships
+# one copy for every page (scripts/fetch-ffmpeg.js) and puts it on the engine's PATH.
 numpy==2.5.3
 scipy==1.18.1
 soundfile==0.14.0
 matplotlib==3.11.2
-imageio-ffmpeg==0.6.0
 pyinstaller==6.22.3
