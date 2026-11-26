@@ -298,3 +298,140 @@ test('Windows keeps a HandBrakeCLI whose NVENC works on drivers older than 570 (
   assert.ok(pin.files.win.name.includes(pin.files.win.version));
   assert.ok(pin.files.mac.name.includes(pin.version), 'Mac stays on the main version');
 });
+
+// ---- With a LUT: FFmpeg converts instead of HandBrakeCLI ----
+const { findFfmpeg, ffmpegInfo } = require('../electron/ffmpeg');
+const { execFileSync } = require('child_process');
+const LUT2 = `TITLE "test"\nLUT_3D_SIZE 2\n${Array(8).fill('1 0 0').join('\n')}\n`;
+const FAKE_INFO = { version: '7.1', encoders: new Set(['libx265', 'hevc_nvenc', 'aac']), filters: new Set(['lut3d', 'lut1d']) };
+const PROBE = `  Duration: 00:00:10.00, start: 0.000000, bitrate: 100 kb/s
+  Stream #0:0[0x1](und): Video: prores (HQ) (apch / 0x68637061), yuv422p10le(tv, bt709, progressive), 1920x1080, 25 fps, 25 tbr, 12800 tbn (default)
+  Stream #0:1[0x2](und): Audio: pcm_s16le (lpcm / 0x6D63706C), 48000 Hz, stereo, s16, 1536 kb/s (default)
+At least one output file must be specified\n`;
+
+// A stand-in FFmpeg: "-i file" alone describes the file; with -progress it "encodes", a few bytes at a time
+function fakeFfmpeg(calls, { fail = () => false, stderr = 'Error while opening encoder\n', hang = false } = {}) {
+  return (exe, args, opts) => {
+    calls.push({ exe, args, opts, lut: opts.cwd && fs.existsSync(path.join(opts.cwd, 'lut.cube')) ? fs.readFileSync(path.join(opts.cwd, 'lut.cube'), 'utf8') : null });
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter(); child.stderr = new EventEmitter();
+    child.kill = () => setImmediate(() => child.emit('close', null));
+    setImmediate(() => {
+      if (!args.includes('-progress')) { child.stderr.emit('data', PROBE); return child.emit('close', 1); }
+      const out = args[args.length - 1];
+      fs.writeFileSync(out, 'partial');
+      for (const c of 'out_time_us=5000000\nspeed=2.00x\nprogress=continue\n') child.stdout.emit('data', c);
+      if (hang) return;
+      if (fail(args)) { child.stderr.emit('data', stderr); child.emit('close', 1); } else child.emit('close', 0);
+    });
+    return child;
+  };
+}
+const lutHandBrake = (root, calls, extra = {}, spawnOpts = {}) => {
+  const cfg = { inputDir: path.join(root, 'In'), outputDir: path.join(root, 'Out'), presetFile: path.join(root, 'Preset/p.json'), lutFile: path.join(root, 'LUTs/S-Log3 to 709.cube'), cliPath: path.join(root, 'no-handbrake'), convertSatsangs: true, ...extra };
+  const hb = new HandBrake({ getSettings: () => cfg, log: () => {}, spawn: fakeFfmpeg(calls, spawnOpts), defaultReportDir: path.join(root, 'R'), findFfmpeg: () => path.join(root, 'ffmpeg'), ffmpegInfo: () => FAKE_INFO });
+  return { hb, cfg };
+};
+const LUT_TREE = { ...INPUT, 'LUTs/S-Log3 to 709.cube': LUT2, 'Preset/p.json': JSON.stringify({ PresetList: [{ PresetName: 'Team', VideoEncoder: 'x265', VideoQualitySlider: 24, PictureWidth: 1920, PictureHeight: 1080, PictureDenoiseFilter: 'nlmeans', AudioList: [{ AudioEncoder: 'aac', AudioBitrate: 160, AudioMixdown: 'stereo' }] }] }) };
+
+test('with a LUT every video goes through FFmpeg, not HandBrakeCLI, and the report says what was used', async () => {
+  const root = tree(LUT_TREE);
+  const calls = [];
+  const { hb, cfg } = lutHandBrake(root, calls);
+  const pv = hb.preview();
+  assert.strictEqual(pv.lut.name, 'S-Log3 to 709.cube');
+  assert.deepStrictEqual(pv.lut.ignored, ['Automatic cropping of black bars (the whole picture is kept)', 'Denoise (nlmeans)']);
+  const r = await hb.start();
+  assert.strictEqual(r.ok, true, r.error);
+  assert.strictEqual(r.done, 4);   // 3 videos + notes.txt; HandBrakeCLI was never needed
+  const encodes = calls.filter((c) => c.args.includes('-progress'));
+  assert.strictEqual(encodes.length, 3);
+  assert.strictEqual(calls.length, 6, 'one look at each file, then its encode');
+  for (const c of encodes) {
+    assert.strictEqual(c.exe, path.join(root, 'ffmpeg'));
+    assert.strictEqual(c.lut, LUT2, 'FFmpeg reads a copy of the LUT from its working folder');
+    assert.match(c.args[c.args.indexOf('-vf') + 1], /lut3d=file=lut\.cube:interp=tetrahedral/);
+    assert.ok(!c.args.join(' ').includes('S-Log3'), "the editor's LUT path is never put into the filter");
+  }
+  assert.ok(!fs.existsSync(encodes[0].opts.cwd), 'the LUT copy is removed after the run');
+  assert.strictEqual(hb.summary().lut, 'S-Log3 to 709.cube');
+  const report = fs.readFileSync(hb.reportFile, 'utf8');
+  assert.match(report, /LUT: {10}.*S-Log3 to 709\.cube \(3D 2×2×2\)/);
+  assert.match(report, /Converter: {4}FFmpeg 7\.1 .*HandBrakeCLI does not apply LUTs/);
+  assert.match(report, /From preset: {2}H\.265 x265, quality 24, up to 1920×1080/);
+  assert.match(report, /Not used: {5}.*Denoise \(nlmeans\)/);
+  assert.match(report, /HandBrake \(LUT S-Log3 to 709\.cube\) finished/);
+  assert.ok(fs.existsSync(path.join(cfg.outputDir, S1, M, 'Clips for Insert', 'Cam-01', 'SHGINF_S001_S001_T001.mp4')));
+  assert.ok(fs.readdirSync(path.join(root, 'R')).some((f) => /_1_ffmpeg\.log$/.test(f)), 'a full FFmpeg log per file');
+});
+
+test('progress and time left come from FFmpeg, even a byte at a time', async () => {
+  const root = tree(LUT_TREE);
+  const { hb } = lutHandBrake(root, [], {}, { hang: true });
+  hb.start();
+  for (let i = 0; i < 50 && !hb.items.some((x) => x.pct); i++) await new Promise((r) => setTimeout(r, 10));
+  const cur = hb.items.find((x) => x.state === 'running');
+  assert.deepStrictEqual([cur.pct, cur.eta], [50, 3]);   // 5 of 10 s done at 2x: 2.5 s left
+  hb.stop();
+});
+
+test('a LUT run is refused up front: bad .cube, no FFmpeg, an encoder this FFmpeg lacks', async () => {
+  const root = tree({ ...LUT_TREE, 'LUTs/half.cube': 'LUT_3D_SIZE 2\n1 0 0\n', 'Preset/vp9.json': JSON.stringify({ PresetList: [{ PresetName: 'W', VideoEncoder: 'vp9' }] }), 'Preset/vt.json': JSON.stringify({ PresetList: [{ PresetName: 'M', VideoEncoder: 'vt_h265' }] }) });
+  const run = (extra, deps = {}) => { const { hb } = lutHandBrake(root, [], extra); Object.assign(hb, deps); return hb.start(); };
+  assert.match((await run({ lutFile: path.join(root, 'LUTs/half.cube') })).error, /incomplete: 1 of 8/);
+  assert.match((await run({ lutFile: path.join(root, 'LUTs/missing.cube') })).error, /LUT file not found/);
+  assert.match((await run({}, { findFfmpeg: () => null })).error, /FFmpeg was not found/);
+  assert.match((await run({ presetFile: path.join(root, 'Preset/vp9.json') })).error, /\(vp9\) can't be used with a LUT/);
+  assert.match((await run({ presetFile: path.join(root, 'Preset/vt.json') })).error, /VideoToolbox, which PostPilot's FFmpeg on this computer doesn't have/);
+  assert.match((await run({}, { ffmpegInfo: () => ({ ...FAKE_INFO, filters: new Set() }) })).error, /no lut3d filter/);
+});
+
+test('an NVENC preset on a PC without a working NVIDIA encoder gets the hardware message; the run carries on', async () => {
+  const root = tree({ ...LUT_TREE, 'Preset/p.json': JSON.stringify({ PresetList: [{ PresetName: 'GPU', VideoEncoder: 'nvenc_h265', VideoQualitySlider: 30 }] }) });
+  const { hb } = lutHandBrake(root, [], {}, { fail: (a) => a.includes('hevc_nvenc'), stderr: '[hevc_nvenc @ 0x1] OpenEncodeSessionEx failed: unsupported device (2): (no details)\n[vost#0:0/hevc_nvenc @ 0x2] Error while opening encoder - maybe incorrect parameters\nConversion failed!\n' });
+  const r = await hb.start();
+  assert.strictEqual(r.failed, 3);
+  const bad = hb.items.find((i) => i.state === 'failed');
+  assert.match(bad.error, /^The NVIDIA NVENC encoder in this preset could not start: \[hevc_nvenc @ 0x1\] OpenEncodeSessionEx failed/);
+  assert.ok(!fs.existsSync(bad.dest), 'no half-written file is left');
+  assert.match(fs.readFileSync(hb.reportFile, 'utf8'), /FFmpeg details:\n.*"-c:v" "hevc_nvenc"/);
+});
+
+test('Stop during a LUT conversion removes the unfinished file', async () => {
+  const root = tree(LUT_TREE);
+  const { hb } = lutHandBrake(root, [], {}, { hang: true });
+  const run = hb.start();
+  for (let i = 0; i < 50 && !hb.items.some((x) => x.state === 'running' && x.pct); i++) await new Promise((r) => setTimeout(r, 10));
+  const cur = hb.items.find((x) => x.state === 'running');
+  hb.stop();
+  const r = await run;
+  assert.strictEqual(r.stopped, true);
+  assert.strictEqual(cur.state, 'skipped');
+  assert.ok(!fs.existsSync(cur.dest));
+});
+
+// The real thing: PostPilot's FFmpeg (npm run fetch-ffmpeg) or one on PATH
+const REAL = findFfmpeg();
+const realOk = (() => { try { return REAL && ffmpegInfo(REAL).encoders.has('libx265'); } catch { return false; } })();
+test('a real FFmpeg applies the LUT: every pixel comes out as the LUT says, tagged BT.709, fitted to the preset', { skip: !realOk && 'no FFmpeg with x265 (npm run fetch-ffmpeg)', timeout: 120000 }, async () => {
+  const root = tree({ 'LUTs/red.cube': LUT2, 'In/x.txt': 'x' });
+  const clip = path.join(root, 'In', 'Cam-01', 'A001.MOV');
+  fs.mkdirSync(path.dirname(clip), { recursive: true });
+  execFileSync(REAL, ['-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc2=size=640x360:rate=25:duration=1', '-f', 'lavfi', '-i', 'sine=duration=1',
+    '-c:v', 'prores_ks', '-pix_fmt', 'yuv422p10le', '-c:a', 'pcm_s16le', clip]);
+  const preset = path.join(root, 'p.json');
+  fs.writeFileSync(preset, JSON.stringify({ PresetList: [{ PresetName: 'T', VideoEncoder: 'x265_10bit', VideoQualitySlider: 28, VideoPreset: 'ultrafast', PictureWidth: 320, PictureHeight: 320, AudioList: [{ AudioEncoder: 'aac', AudioBitrate: 96, AudioMixdown: 'mono' }] }] }));
+  const cfg = { inputDir: path.join(root, 'In'), outputDir: path.join(root, 'Out'), presetFile: preset, lutFile: path.join(root, 'LUTs/red.cube'), convertSatsangs: true };
+  const hb = new HandBrake({ getSettings: () => cfg, log: () => {}, defaultReportDir: path.join(root, 'R') });
+  const r = await hb.start();
+  assert.strictEqual(r.done, 2, JSON.stringify(hb.items.map((i) => i.error)));
+  const out = path.join(cfg.outputDir, 'Cam-01', 'A001.mp4');
+  let info = '';
+  try { execFileSync(REAL, ['-hide_banner', '-i', out], { stdio: 'pipe' }); } catch (err) { info = String(err.stderr); }
+  assert.match(info, /Video: hevc \(Main 10\) \(hvc1.*yuv420p10le\(tv, bt709, progressive\), 320x180/);
+  assert.match(info, /Audio: aac .*mono/);
+  const rgb = execFileSync(REAL, ['-loglevel', 'error', '-i', out, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 16 << 20 });
+  let red = 0, other = 0;
+  for (let i = 0; i < rgb.length; i += 3) { red += rgb[i]; other += rgb[i + 1] + rgb[i + 2]; }
+  assert.ok(red / (rgb.length / 3) > 250 && other / (rgb.length / 3) < 6, 'all red');
+});

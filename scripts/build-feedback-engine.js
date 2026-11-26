@@ -1,8 +1,10 @@
 // Freezes the audio engines, Feedback Cutter (electron/feedbackcutter/feedback_bridge.py + dsp.py) and
 // Quiet Lift (electron/quietlift/quiet_lift_bridge.py + quiet_lift.py), with Python, numpy, scipy,
-// soundfile, matplotlib and FFmpeg into vendor/feedback-engine/<win, mac-arm64, mac-x64>/, which the
+// soundfile and matplotlib into vendor/feedback-engine/<win, mac-arm64, mac-x64>/, which the
 // build packs into the app (resources/feedback-engine): nobody needs Python installed. One program for
 // both (scripts/feedback-engine-main.py picks the engine), so the packages are in the app once.
+// FFmpeg is not in it: the app has one copy for every page (resources/ffmpeg, scripts/fetch-ffmpeg.js)
+// and starts the engine with that copy's folder first on PATH, where dsp.py looks first.
 //   node scripts/build-feedback-engine.js [--force] [--arch arm64|x64]
 // Needs Python 3 on the build computer (FEEDBACK_ENGINE_PYTHON, else `py -3` / `python3`, else `python`);
 // the packages come from scripts/feedback-engine-requirements.txt into a venv under vendor/feedback-engine.
@@ -68,8 +70,8 @@ fs.rmSync(dest, { recursive: true, force: true });
 runPython(['-m', 'PyInstaller', '--noconfirm', '--clean', '--onedir', '--log-level', 'WARN',
   '--name', 'feedback-engine', '--distpath', dest, '--workpath', work, '--specpath', work,
   '--paths', path.join(ROOT, 'electron', 'feedbackcutter'), '--paths', path.join(ROOT, 'electron', 'quietlift'),
-  '--collect-all', 'imageio_ffmpeg',   // its FFmpeg: MP3 previews and non-WAV recordings
-  ...['tkinter', 'IPython', 'PyQt5', 'PySide6', 'pytest'].flatMap((m) => ['--exclude-module', m]),
+  // imageio_ffmpeg: dsp.py's last-resort FFmpeg; kept out so a second FFmpeg can't slip back into the app
+  ...['tkinter', 'IPython', 'PyQt5', 'PySide6', 'pytest', 'imageio_ffmpeg'].flatMap((m) => ['--exclude-module', m]),
   entry]);
 if (!fs.existsSync(exe)) throw new Error(`PyInstaller did not produce ${exe}`);
 fs.writeFileSync(stamp, `${digest}\n`);

@@ -352,7 +352,7 @@ details.more summary:hover { color: var(--text); }
 .hb-item { display: grid; grid-template-columns: 80px 1fr 150px; gap: 12px; align-items: start; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
 .hb-item:last-child { border-bottom: 0; }
 .hb-item .m { min-width: 0; word-break: break-all; user-select: text; }
-.hb-item .err { color: var(--bad); font-size: 12px; }
+.hb-item .err, #hb-lut-note .err { color: var(--bad); font-size: 12px; }
 .hb-kind { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .5px; }
 .hb-item .bar { width: 100px; }
 /* Encoder: range window (choose the part of a file to export) */

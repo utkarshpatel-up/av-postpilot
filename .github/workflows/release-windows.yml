@@ -36,9 +36,10 @@ jobs:
           [ "$tag" = "v$version" ] || { echo "Tag $tag does not match version $version"; exit 1; }
       - run: npm ci
       - run: npm test
-      - name: Fetch HandBrakeCLI and build the audio engine
+      - name: Fetch HandBrakeCLI and FFmpeg, build the audio engine
         run: |
           node scripts/fetch-handbrake.js win
+          node scripts/fetch-ffmpeg.js win
           node scripts/build-feedback-engine.js
         env:
           FEEDBACK_ENGINE_PYTHON: ${{ steps.python.outputs.python-path }}

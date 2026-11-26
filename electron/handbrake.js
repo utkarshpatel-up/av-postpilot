@@ -3,31 +3,29 @@
 // with HandBrakeCLI and a preset exported from HandBrake, copying everything else.
 // "Clips only" mode converts just the Cam-xx clips and then files the H264
 // recordings into the matching satsang folders (by number, name or best match).
+// With a LUT chosen, the videos are converted by PostPilot's FFmpeg instead (lut-convert.js):
+// HandBrakeCLI has no LUT filter.
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn: nodeSpawn } = require('child_process');
+const { readPreset, readLut, describePreset, parseProbe, ffmpegArgs } = require('./lut-convert');
+const ffmpegTools = require('./ffmpeg');
 
 const VIDEO = new Set(['.mov', '.mp4']);
 const JUNK = new Set(['thumbs.db', 'desktop.ini']);
 const LCS_MIN = 30;   // shortest shared run of characters that counts as a name match
 const LONG_PATH = 240;  // HandBrakeCLI cannot open paths around 250+ characters; keep a margin
+const LUT_NAME = 'lut.cube';   // the LUT's copy in FFmpeg's working folder (see encodeLut)
+const CAUSE = /\berror\b|fail|invalid|cannot|can't|unable|unsupported|not support|minimum required|not found|no such|no title|denied|nvcuda|out of memory/i;
 
 const DEFAULTS = {
-  inputDir: '', outputDir: '', h264Dir: '', reportDir: '', presetFile: '', cliPath: '',
+  inputDir: '', outputDir: '', h264Dir: '', reportDir: '', presetFile: '', cliPath: '', lutFile: '',
   convertSatsangs: true, copyMp4: true, afterQueue: 'nothing', shutdownSeconds: 60,
 };
 
 // The preset HandBrakeCLI should use: the first one in the exported file (nested or flat).
-function presetName(file) {
-  const data = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
-  for (const p of data.PresetList || []) {
-    const child = (p.ChildrenArray || []).find((c) => c.PresetName);
-    if (child) return child.PresetName;
-    if (p.PresetName) return p.PresetName;
-  }
-  throw Error('No preset name found in the preset file');
-}
+const presetName = (file) => readPreset(file).PresetName;
 
 function lcsLen(a, b) {
   a = a.toLowerCase(); b = b.toLowerCase();
@@ -180,10 +178,31 @@ function mkdirp(dir) {
   }
 }
 
+// "3D 33×33×33" / "1D 1024"
+const lutSize = (lut) => (lut.kind === '3d' ? `3D ${lut.size}×${lut.size}×${lut.size}` : `1D ${lut.size}`);
+// What the page shows about a LUT run (no Sets: it goes over IPC)
+const lutSummary = (lut) => ({
+  name: lut.name, file: lut.file, size: lutSize(lut), ffmpeg: lut.ffmpeg, version: lut.version,
+  builtIn: Boolean(lut.ffmpeg) && lut.ffmpeg === ffmpegTools.bundledFfmpeg(),
+  summary: lut.plan ? lut.plan.summary : [], ignored: lut.plan ? lut.plan.ignored : [],
+});
+
+// A hardware encoder that could not start, from FFmpeg's error output, or ''.
+function ffmpegGpuFailure(text) {
+  if (/nvenc/i.test(text) && /OpenEncodeSession|nvcuda|No capable devices|required nvenc API|minimum required Nvidia driver|Cannot load/i.test(text)) return 'NVIDIA NVENC';
+  if (/qsv|mfx/i.test(text) && /Error (initializing|creating)|MFX session|failed to (create|initiali[sz]e)|unsupported/i.test(text)) return 'Intel Quick Sync';
+  if (/amf/i.test(text) && /amfrt|AMF (failed|init)|Failed to (create|init)/i.test(text)) return 'AMD';
+  if (/videotoolbox/i.test(text) && /cannot create compression session|Error: cannot|VTCompressionSession/i.test(text)) return 'Apple VideoToolbox';
+  return '';
+}
+
 class HandBrake {
-  // deps: getSettings() -> settings.handbrake, log, notifier, onChange, onQueueDone(action, what), spawn, defaultReportDir
+  // deps: getSettings() -> settings.handbrake, log, notifier, onChange, onQueueDone(action, what), spawn, defaultReportDir,
+  // findFfmpeg() and ffmpegInfo(path) (electron/ffmpeg.js unless a test passes its own)
   constructor(deps) {
-    Object.assign(this, { spawn: nodeSpawn }, deps);
+    Object.assign(this, { spawn: nodeSpawn, findFfmpeg: () => ffmpegTools.findFfmpeg(), ffmpegInfo: ffmpegTools.ffmpegInfo }, deps);
+    this.lutRun = null;
+    this.lutName = '';
     this.running = false;
     this.stopping = false;
     this.items = [];
@@ -198,7 +217,7 @@ class HandBrake {
     const count = (k) => this.items.filter((i) => i.state === k).length;
     return {
       running: this.running, stopping: this.stopping, startedAt: this.startedAt, finishedAt: this.finishedAt,
-      reportFile: this.reportFile, error: this.lastError,
+      reportFile: this.reportFile, error: this.lastError, lut: this.lutName,
       counts: { total: this.items.length, done: count('done'), failed: count('failed'), skipped: count('skipped'), waiting: count('waiting') },
       items: this.items,
     };
@@ -219,17 +238,35 @@ class HandBrake {
       if (!fs.existsSync(cfg.h264Dir)) throw Error(`H264 recordings folder not found: ${cfg.h264Dir}`);
     }
     const preset = presetName(cfg.presetFile);
+    // With a LUT the videos go through FFmpeg, so HandBrakeCLI isn't needed
+    if (s.lutFile) return { cfg, cli: null, preset, lut: this.checkLut(path.resolve(s.lutFile), cfg.presetFile, needCli) };
     const cli = findCli(s.cliPath);
     if (needCli && !cli) throw Error('HandBrakeCLI was not found. It normally comes with PostPilot; reinstall PostPilot or choose HandBrakeCLI on this page.');
     return { cfg, cli, preset };
   }
 
+  // The LUT, the FFmpeg that will apply it and the preset's settings as FFmpeg uses them.
+  // Throws with a message for the page (bad .cube, no FFmpeg, an encoder this FFmpeg lacks …).
+  checkLut(file, presetFile, needFfmpeg = true) {
+    const lut = { file, name: path.basename(file), ...readLut(file), ffmpeg: this.findFfmpeg(), version: '' };
+    if (needFfmpeg && !lut.ffmpeg) throw Error('FFmpeg was not found. It comes with PostPilot; reinstall PostPilot.');
+    let info = null;
+    if (lut.ffmpeg) {
+      try { info = this.ffmpegInfo(lut.ffmpeg); } catch (err) { throw Error(`FFmpeg could not run (${lut.ffmpeg}): ${err.message}`); }
+      const filter = lut.kind === '1d' ? 'lut1d' : 'lut3d';
+      if (!info.filters.has(filter)) throw Error(`This FFmpeg has no ${filter} filter, so it can't apply a LUT: ${lut.ffmpeg}`);
+      lut.version = info.version;
+    }
+    lut.plan = presetFile && fs.existsSync(presetFile) ? describePreset(readPreset(presetFile), info && info.encoders) : null;
+    return lut;
+  }
+
   // What a run would do, without touching anything.
   preview() {
-    const { cfg, cli, preset } = this.check(false);
+    const { cfg, cli, preset, lut } = this.check(false);
     const step1 = planConvert(cfg);
     const step2 = cfg.convertSatsangs ? [] : planH264(cfg, plannedLister(step1.dirs));
-    return { cli, preset, items: [...step1.items, ...step2], newDirs: step1.dirs.filter((d) => !fs.existsSync(d)).length };
+    return { cli, preset, lut: lut ? lutSummary(lut) : null, items: [...step1.items, ...step2], newDirs: step1.dirs.filter((d) => !fs.existsSync(d)).length };
   }
 
   report(line) {
@@ -241,9 +278,9 @@ class HandBrake {
     if (this.running) return { ok: false, error: 'Already running' };
     let setup;
     try { setup = this.check(true); } catch (err) { return { ok: false, error: err.message }; }
-    const { cfg, cli, preset } = setup;
+    const { cfg, cli, preset, lut } = setup;
     this.outputRoot = cfg.outputDir;
-    Object.assign(this, { running: true, stopping: false, items: [], startedAt: Date.now(), finishedAt: null, lastError: '' });
+    Object.assign(this, { running: true, stopping: false, items: [], startedAt: Date.now(), finishedAt: null, lastError: '', lutName: lut ? lut.name : '', lutRun: null });
     const reportDir = cfg.reportDir ? path.resolve(cfg.reportDir) : this.defaultReportDir;
     try {
       mkdirp(cfg.outputDir);
@@ -254,7 +291,15 @@ class HandBrake {
       this.report(`Output:       ${cfg.outputDir}`);
       this.report(`Preset file:  ${cfg.presetFile}`);
       this.report(`Preset name:  ${preset}`);
-      this.report(`HandBrakeCLI: ${cli}`);
+      if (lut) {
+        this.report(`LUT:          ${lut.file} (${lutSize(lut)})`);
+        this.report(`Converter:    FFmpeg ${lut.version} (${lut.ffmpeg}); HandBrakeCLI does not apply LUTs`);
+        this.report(`From preset:  ${lut.plan.summary.join(', ')}`);
+        if (lut.plan.ignored.length) this.report(`Not used:     ${lut.plan.ignored.join('; ')}`);
+        // FFmpeg reads a copy, made once: the LUT can't change halfway through the run
+        this.lutRun = { ...lut, dir: fs.mkdtempSync(path.join(os.tmpdir(), 'pp-lut-')) };
+        fs.copyFileSync(lut.file, path.join(this.lutRun.dir, LUT_NAME));
+      } else this.report(`HandBrakeCLI: ${cli}`);
       this.report(`Mode:         ${cfg.convertSatsangs ? 'Convert everything' : `Clips for Insert only, then ${cfg.copyMp4 ? 'copy' : 'move'} H264 recordings from ${cfg.h264Dir}`}`);
       // Mirror the folders first (empty ones too) so the H264 step can find its targets.
       const step1 = planConvert(cfg);
@@ -276,11 +321,12 @@ class HandBrake {
       this.report(`[ERROR] ${err.message}`);
       this.log('error', `HandBrake: ${err.message}`);
     }
+    if (this.lutRun) { fs.rmSync(this.lutRun.dir, { recursive: true, force: true }); this.lutRun = null; }
     const stopped = this.stopping;
     this.items.filter((i) => i.state === 'waiting').forEach((i) => { i.state = 'skipped'; i.reason = 'stopped'; });
     this.running = false; this.stopping = false; this.finishedAt = Date.now();
     const c = this.summary().counts;
-    const msg = `HandBrake ${stopped ? 'stopped' : 'finished'} in ${fmtDur(this.finishedAt - this.startedAt)}: ${c.done} done, ${c.failed} failed, ${c.skipped} skipped`;
+    const msg = `HandBrake${lut ? ` (LUT ${lut.name})` : ''} ${stopped ? 'stopped' : 'finished'} in ${fmtDur(this.finishedAt - this.startedAt)}: ${c.done} done, ${c.failed} failed, ${c.skipped} skipped`;
     this.report(msg);
     this.log(c.failed || this.lastError ? 'warn' : 'info', msg);
     this.notifier?.notify('handbrakeDone', `🎞️ ${msg}${this.lastError ? `\n⚠️ ${this.lastError}` : ''}`);
@@ -313,7 +359,7 @@ class HandBrake {
         item.state = this.stopping && item.kind === 'convert' ? 'skipped' : 'failed';
         item.error = this.stopping && item.kind === 'convert' ? 'stopped' : err.message;
         this.report(`[ERROR] ${item.src}: ${item.error}`);
-        if (err.detail) this.report(`HandBrakeCLI details:\n${err.detail}`);
+        if (err.detail) this.report(`${this.lutRun ? 'FFmpeg' : 'HandBrakeCLI'} details:\n${err.detail}`);
         if (item.state === 'failed') this.log('error', `HandBrake: ${path.basename(item.src)}: ${err.message}`);
       }
       item.finishedAt = Date.now();
@@ -338,7 +384,8 @@ class HandBrake {
         }
         input = path.join(link.path, path.basename(input));
       }
-      await this.encode(item, cli, presetFile, preset, input, out);
+      if (this.lutRun) await this.encodeLut(item, input, out);
+      else await this.encode(item, cli, presetFile, preset, input, out);
       if (out !== item.dest) await moveFile(out, item.dest);
     } catch (err) {
       try { fs.unlinkSync(out); } catch { /* not there */ }
@@ -360,7 +407,6 @@ class HandBrake {
       log(`HandBrakeCLI: ${cli}\nPreset: ${preset} (${presetFile})\nCommand: ${command}\n\n`);
       const causes = [], tailLines = [];
       let partial = { out: '', err: '' }, lastProgress = 0, last = 0, gpu = '', tail = '', recentOut = '';
-      const CAUSE = /\berror\b|fail|invalid|cannot|can't|unable|unsupported|not support|minimum required|not found|no such|no title|denied|nvcuda|out of memory/i;
       const line = (l) => {
         l = l.trim();
         if (!l) return;
@@ -423,6 +469,84 @@ class HandBrake {
     });
   }
 
+  // With a LUT: FFmpeg instead of HandBrakeCLI. It runs in the folder holding the LUT's copy, so the
+  // filter names it "lut.cube" and the editor's path (D:\LUTs\…, with its colon and backslashes) never
+  // has to survive FFmpeg's filter escaping. First a quick look at the file (size, colour, audio tracks).
+  async encodeLut(item, input, out) {
+    const { ffmpeg, dir, plan, kind } = this.lutRun;
+    const logFile = this.reportFile ? this.reportFile.replace(/\.txt$/, `_${item.id}_ffmpeg.log`) : null;
+    const log = (text) => { if (logFile) try { fs.appendFileSync(logFile, text); } catch { /* the report still has the rest */ } };
+    const probe = parseProbe(await this.ffmpegProbe(ffmpeg, input, dir));
+    if (!probe.video) throw Error('FFmpeg found no video in this file');
+    const args = ffmpegArgs(plan, probe, { input, output: out, lut: { name: LUT_NAME, kind } });
+    const command = `${ffmpeg} ${args.map((a) => `"${a}"`).join(' ')}`;
+    log(`FFmpeg: ${ffmpeg}\nLUT: ${this.lutRun.file}\nFrom preset: ${plan.summary.join(', ')}\nCommand (in ${dir}): ${command}\n\n`);
+    return new Promise((resolve, reject) => {
+      const causes = [], tailLines = [];
+      let errPart = '', outPart = '', tail = '', last = 0, lastLogged = 0;
+      const progress = {};
+      const errLine = (l) => {
+        l = l.trim();
+        if (!l) return;
+        if (CAUSE.test(l) && causes.length < 20 && !causes.includes(l)) causes.push(l);
+        tailLines.push(l); if (tailLines.length > 40) tailLines.shift();
+        log(`${l}\n`);
+      };
+      // -progress pipe:1 writes blocks of key=value lines, each ending with progress=continue|end
+      const outLine = (l) => {
+        const [k, v] = l.trim().split('=');
+        if (!k || v === undefined) return;
+        progress[k] = v;
+        if (k !== 'progress') return;
+        const done = Number(progress.out_time_us) / 1e6, speed = parseFloat(progress.speed);
+        if (probe.duration && done >= 0) {
+          item.pct = Math.min(100, (done / probe.duration) * 100);
+          item.eta = speed > 0 ? Math.max(0, Math.round((probe.duration - done) / speed)) : null;
+        }
+        if (Date.now() - lastLogged >= 60000) { lastLogged = Date.now(); log(`progress: ${progress.out_time || ''} of ${probe.duration || '?'} s, ${progress.speed || ''}\n`); }
+        if (Date.now() - last > 1000) { last = Date.now(); this.changed(); }
+      };
+      const split = (part, buf, fn) => { const lines = (part + buf).split(/\r\n|\n|\r/); const rest = lines.pop(); lines.forEach(fn); return rest; };
+      const fail = (message) => {
+        const err = Error(message);
+        err.detail = `${command}\n${causes.length ? `Error lines seen (first ${causes.length}):\n${causes.join('\n')}\n` : ''}Last output:\n${tailLines.join('\n')}${logFile ? `\nFull FFmpeg log: ${logFile}` : ''}`;
+        return err;
+      };
+      const child = this.child = this.spawn(ffmpeg, args, { windowsHide: true, cwd: dir });
+      child.stdout?.on('data', (buf) => { outPart = split(outPart, String(buf), outLine); });
+      child.stderr?.on('data', (buf) => { tail = (tail + buf).slice(-4000); errPart = split(errPart, String(buf), errLine); });
+      child.on('error', (err) => { this.child = null; log(`Could not start: ${err.message}\n`); const e = fail(`Could not start FFmpeg: ${err.message}`); e.code = err.code; reject(e); });
+      child.on('close', (code) => {
+        this.child = null;
+        if (errPart) errLine(errPart);
+        log(`\nExit code: ${code}\n`);
+        if (code === 0 && !this.stopping && fs.existsSync(out)) { item.pct = 100; return resolve(); }
+        try { fs.unlinkSync(out); } catch { /* not there */ }
+        if (this.stopping) return reject(Error('stopped'));
+        const gpu = ffmpegGpuFailure(tail);
+        const first = causes.find((l) => !/^Conversion failed|^Error while|^Error opening output files/i.test(l)) || causes[0];
+        if (gpu) return reject(fail(`The ${gpu} encoder in this preset could not start${first ? `: ${first}` : ''}. This PC may not have that graphics hardware, or its graphics driver is too old for this FFmpeg. Choose a preset with another encoder (x265 works everywhere). The full output is in the FFmpeg log next to the report.`));
+        reject(fail(`FFmpeg exit code ${code}${first ? `: ${first}` : ''}${tailLines.length ? ` (last output: ${tailLines.slice(-3).join(' | ')})` : ''}`));
+      });
+    });
+  }
+
+  // "ffmpeg -i file" with no output: describes the file on stderr, then exits with an error (expected).
+  ffmpegProbe(ffmpeg, input, cwd) {
+    return new Promise((resolve, reject) => {
+      let text = '';
+      const child = this.child = this.spawn(ffmpeg, ['-hide_banner', '-nostdin', '-i', input], { windowsHide: true, cwd });
+      child.stderr?.on('data', (buf) => { text = (text + buf).slice(-200000); });
+      child.on('error', (err) => { this.child = null; reject(Error(`Could not start FFmpeg (${ffmpeg}): ${err.message}`)); });
+      child.on('close', () => {
+        this.child = null;
+        if (this.stopping) return reject(Error('stopped'));
+        if (!/Stream #/.test(text)) return reject(Error(`FFmpeg could not read this file: ${text.trim().split(/\r?\n/).pop() || 'no details'}`));
+        resolve(text);
+      });
+    });
+  }
+
   stop() {
     if (!this.running) return;
     this.stopping = true;
@@ -431,4 +555,4 @@ class HandBrake {
   }
 }
 
-module.exports = { bundledCli, HandBrake, DEFAULTS, presetName, planConvert, planH264, plannedLister, findCli, lcsLen, mkdirp };
+module.exports = { bundledCli, HandBrake, DEFAULTS, presetName, planConvert, planH264, plannedLister, findCli, lcsLen, mkdirp, lutSummary, ffmpegGpuFailure };

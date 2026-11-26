@@ -3,7 +3,7 @@
 let hb = { running: false, items: [], counts: {} };
 let hbPreview = null;     // last Preview result, shown until a run starts
 let hbInfo = {};
-const HB_FIELDS = { inputDir: 'hb-input', outputDir: 'hb-output', h264Dir: 'hb-h264', reportDir: 'hb-report', presetFile: 'hb-preset' };
+const HB_FIELDS = { inputDir: 'hb-input', outputDir: 'hb-output', h264Dir: 'hb-h264', reportDir: 'hb-report', presetFile: 'hb-preset', lutFile: 'hb-lut' };
 const HB_KIND = { convert: 'Convert', copy: 'Copy', move: 'Move', skip: 'Skip' };
 const HB_STATE = { waiting: 'Waiting', running: 'Running', done: 'Done', failed: 'Failed', skipped: 'Skipped' };
 const HB_LIMIT = 1000;    // rows drawn at once; the report file has everything
@@ -19,6 +19,21 @@ async function hbLoadInfo() {
   const pc = $('hb-preset-check');
   pc.className = `pill ${r.preset ? 'ok' : 'bad'}${settings.handbrake.presetFile ? '' : ' hidden'}`;
   pc.textContent = r.preset ? `Preset: ${r.preset.trim()}` : (r.presetError || 'Not a HandBrake preset');
+  // A LUT: FFmpeg converts instead of HandBrakeCLI, with the preset's main settings
+  const hasLut = Boolean(settings.handbrake.lutFile);
+  const lc = $('hb-lut-check'), note = $('hb-lut-note');
+  lc.className = `pill ${r.lut ? 'ok' : 'bad'}${hasLut ? '' : ' hidden'}`;
+  lc.textContent = r.lut ? `${r.lut.size} LUT` : 'Not usable';   // short: the reason goes in the note below
+  $('hb-lut-clear').classList.toggle('hidden', !hasLut);
+  note.classList.toggle('hidden', !r.lut && !(hasLut && r.lutError));
+  if (!r.lut && r.lutError) note.innerHTML = `<span class="err">${esc(r.lutError)}</span>`;
+  if (r.lut) {
+    const by = r.lut.ffmpeg ? `FFmpeg ${esc(r.lut.version)}${r.lut.builtIn ? ' (comes with PostPilot)' : ` (${esc(r.lut.ffmpeg)})`}` : '<span class="err">FFmpeg (not found: reinstall PostPilot)</span>';
+    note.innerHTML = `Every video gets this LUT and is converted by ${by} instead of HandBrakeCLI, which cannot apply LUTs. `
+      + (r.lut.summary.length ? `From the preset it uses: ${esc(r.lut.summary.join(', '))}.` : 'Choose the preset file to see which of its settings are used.')
+      + (r.lut.ignored.length ? ` <b>Not used with a LUT:</b> ${esc(r.lut.ignored.join('; '))}.` : '')
+      + ' Converting with a LUT takes longer than without.';
+  }
 }
 
 function hbRenderForm() {
@@ -34,7 +49,7 @@ function hbRenderForm() {
 
 const hbSave = (mutate) => save((s) => mutate(s.handbrake)).then(() => { hbPreview = null; hbRenderForm(); });
 
-function hbRow(i) {
+function hbRow(i, lut) {
   const name = i.src.split(/[\\/]/).pop();
   const target = i.dest ? `<div class="muted small">→ ${esc(i.dest)}${i.match ? ` · ${esc(i.match)}` : ''}</div>` : '';
   const why = i.reason ? `<div class="${i.error ? 'err' : 'muted small'}">${esc(i.reason)}</div>` : '';
@@ -42,27 +57,28 @@ function hbRow(i) {
   let st = '';
   if (i.state === 'running' && i.kind === 'convert') st = `<span class="bar"><i style="width:${(i.pct || 0).toFixed(1)}%"></i></span><span class="small">${Math.floor(i.pct || 0)}%</span>`;
   else if (i.state) st = `<span class="state ${i.state === 'skipped' ? '' : i.state}">${HB_STATE[i.state]}</span>${i.finishedAt && i.startedAt && i.kind === 'convert' && i.state === 'done' ? ` <span class="muted small">${fmtSec(Math.round((i.finishedAt - i.startedAt) / 1000))}</span>` : ''}`;
-  return `<div class="hb-item"><span class="hb-kind">${HB_KIND[i.kind]}${i.h264 ? ' H264' : ''}</span>
+  return `<div class="hb-item"><span class="hb-kind">${HB_KIND[i.kind]}${i.h264 ? ' H264' : ''}${lut && i.kind === 'convert' ? '<br>+ LUT' : ''}</span>
     <div class="m">${esc(name)}<div class="muted small">${esc(i.src)}</div>${target}${why}${err}</div><span>${st}</span></div>`;
 }
 
 function hbRender() {
   const showRun = hb.running || (!hbPreview && hb.items.length);
   const items = showRun ? hb.items : hbPreview?.items || [];
+  const lut = showRun ? hb.lut : hbPreview?.lut?.name || '';
   const showSkipped = $('hb-show-skipped').checked;
   const visible = items.filter((i) => showSkipped || (i.kind !== 'skip' && i.state !== 'skipped') || i.error || i.state === 'failed');
   const n = (k) => items.filter((i) => i.kind === k).length;
   $('hb-list-label').textContent = showRun ? (hb.running ? 'Converting' : 'Last run') : hbPreview ? 'Preview' : 'Files';
   $('hb-items').innerHTML = !items.length
     ? `<div class="empty">${hbPreview ? 'Nothing to do: the input folder has no files.' : 'Click "Preview" to see what will be converted, copied and skipped.'}</div>`
-    : visible.slice(0, HB_LIMIT).map(hbRow).join('') + (visible.length > HB_LIMIT ? `<div class="empty">…and ${visible.length - HB_LIMIT} more (all are listed in the report file)</div>` : '')
+    : visible.slice(0, HB_LIMIT).map((i) => hbRow(i, lut)).join('') + (visible.length > HB_LIMIT ? `<div class="empty">…and ${visible.length - HB_LIMIT} more (all are listed in the report file)</div>` : '')
       + (!visible.length ? '<div class="empty">Everything is skipped. Tick "Show skipped" to see why.</div>' : '');
 
   if (showRun) {
     const c = hb.counts;
-    $('hb-summary').textContent = `${c.done} done · ${c.failed} failed · ${c.skipped} skipped${hb.running ? ` · ${c.waiting} waiting` : ''}${hb.error ? ` · ${hb.error}` : ''}`;
+    $('hb-summary').textContent = `${c.done} done · ${c.failed} failed · ${c.skipped} skipped${hb.running ? ` · ${c.waiting} waiting` : ''}${lut ? ` · LUT ${lut}` : ''}${hb.error ? ` · ${hb.error}` : ''}`;
   } else if (hbPreview) {
-    $('hb-summary').textContent = `${n('convert')} to convert · ${n('copy')} to copy${n('move') ? ` · ${n('move')} to move` : ''} · ${n('skip')} skipped${hbPreview.newDirs ? ` · ${hbPreview.newDirs} new folder(s)` : ''}`;
+    $('hb-summary').textContent = `${n('convert')} to convert${lut ? ` with LUT ${lut}` : ''} · ${n('copy')} to copy${n('move') ? ` · ${n('move')} to move` : ''} · ${n('skip')} skipped${hbPreview.newDirs ? ` · ${hbPreview.newDirs} new folder(s)` : ''}`;
   } else $('hb-summary').textContent = '';
 
   const cur = hb.running && hb.items.find((i) => i.state === 'running');
@@ -72,14 +88,14 @@ function hbRender() {
     const finished = work.filter((i) => ['done', 'failed', 'skipped'].includes(i.state)).length + (cur?.kind === 'convert' ? (cur.pct || 0) / 100 : 0);
     $('hb-bar').style.width = `${work.length ? (finished / work.length) * 100 : 0}%`;
     $('hb-current').textContent = hb.stopping ? 'Stopping…' : cur
-      ? `${HB_KIND[cur.kind]} ${cur.src.split(/[\\/]/).pop()}${cur.kind === 'convert' ? ` · ${Math.floor(cur.pct || 0)}%${cur.eta != null ? ` · ${fmtSec(cur.eta)} left` : ''}` : ''}`
+      ? `${HB_KIND[cur.kind]}${lut && cur.kind === 'convert' ? ' + LUT' : ''} ${cur.src.split(/[\\/]/).pop()}${cur.kind === 'convert' ? ` · ${Math.floor(cur.pct || 0)}%${cur.eta != null ? ` · ${fmtSec(cur.eta)} left` : ''}` : ''}`
       : 'Working…';
   }
   $('hb-start').disabled = hb.running;
   $('hb-start').textContent = hb.running ? 'Converting…' : 'Start converting';
   $('hb-preview').disabled = hb.running;
   $('hb-stop').disabled = !hb.running || hb.stopping;
-  document.querySelectorAll('#page-handbrake input, #page-handbrake select, [data-hb-browse], #hb-preset-browse, #hb-cli-browse')
+  document.querySelectorAll('#page-handbrake input, #page-handbrake select, [data-hb-browse], #hb-preset-browse, #hb-cli-browse, #hb-lut-browse, #hb-lut-clear')
     .forEach((el) => { if (el.id !== 'hb-show-skipped' && el.id !== 'hb-after' && !el.closest('.countdown')) el.disabled = hb.running; });
   const badge = $('nav-hb-badge');
   badge.classList.toggle('hidden', !hb.running);
@@ -100,6 +116,12 @@ $('hb-preset-browse').addEventListener('click', async () => {
   if (!r.ok) return toast(r.error, true);
   if (r.path) hbSave((h) => { h.presetFile = r.path; });
 });
+$('hb-lut-browse').addEventListener('click', async () => {
+  const r = await pilot.handbrake('pick-lut', { current: settings.handbrake.lutFile });
+  if (!r.ok) return toast(r.error, true);
+  if (r.path) hbSave((h) => { h.lutFile = r.path; });
+});
+$('hb-lut-clear').addEventListener('click', () => hbSave((h) => { h.lutFile = ''; }));
 $('hb-cli-browse').addEventListener('click', async () => {
   const r = await pilot.handbrake('pick-cli', { current: settings.handbrake.cliPath || hbInfo.cli });
   if (r.ok && r.path) hbSave((h) => { h.cliPath = r.path; });
@@ -115,7 +137,8 @@ $('hb-preview').addEventListener('click', async () => {
   $('hb-preview').disabled = hb.running;
   if (!r.ok) return toast(r.error, true);
   hbPreview = r;
-  if (!r.cli) toast('Preview ready, but HandBrakeCLI was not found: choose it before starting', true);
+  if (r.lut && !r.lut.ffmpeg) toast('Preview ready, but FFmpeg was not found: reinstall PostPilot before converting with a LUT', true);
+  else if (!r.lut && !r.cli) toast('Preview ready, but HandBrakeCLI was not found: choose it before starting', true);
   hbRender();
 });
 $('hb-start').addEventListener('click', async () => {

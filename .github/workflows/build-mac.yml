@@ -11,6 +11,7 @@ on:
       - 'scripts/verify-mac-package.js'
       - 'scripts/build-feedback-engine.js'
       - 'scripts/feedback-engine-*'
+      - 'scripts/fetch-ffmpeg.js'
       - 'package*.json'
       - '.github/workflows/build-mac.yml'
 jobs:
@@ -47,6 +48,9 @@ jobs:
         run: node scripts/build-feedback-engine.js --arch x64
         env:
           FEEDBACK_ENGINE_PYTHON: ${{ steps.python-x64.outputs.python-path }}
+      # Before the tests: they run the built engine with this FFmpeg, as the app does
+      - name: Fetch FFmpeg (both architectures)
+        run: node scripts/fetch-ffmpeg.js mac
       - run: npm test
       - run: npm run dist:mac
         env:
